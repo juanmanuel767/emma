@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/jarvis", "/tmp/emma"],
+      "description": "Acceso seguro al sistema de archivos del proyecto"
+    },
+    "brave-search": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "description": "Búsqueda web real via Brave Search — resultados frescos, sin tracking"
+    }
+  }
+}

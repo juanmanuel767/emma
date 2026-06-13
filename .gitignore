@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+.turbo/
+.wwebjs_auth/
+.wwebjs_cache/
+*.pem
+*.key
+*-token.backup
