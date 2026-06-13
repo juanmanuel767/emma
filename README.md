@@ -56,24 +56,27 @@ Monorepo pnpm con capas hexagonales (`domain` → `application` → `infrastruct
 
 ## ⚙️ Instalación
 
+### 🟢 Funciona sin ninguna clave
+
+Emma usa **Ollama** (modelos de IA locales y gratuitos) por defecto. **No necesitas registrarte ni configurar nada.** El instalador lo prepara todo:
+
 ```bash
-# 1. Dependencias
-pnpm install
-
-# 2. Infraestructura (Postgres + Redis)
-docker compose -f docker-compose.dev.yml up -d
-
-# 3. Configuración
-cp .env.example .env   # añade tus claves (o hazlo desde la web)
-
-# 4. Compilar y arrancar
-pnpm build
-pnpm dev
+./install.sh
 ```
 
-Luego abre **http://localhost:5173** y completa el onboarding desde la web — Emma te pedirá las claves que necesite.
+Esto instala Ollama, descarga el modelo, levanta Postgres + Redis, crea tu `.env` y arranca Emma. Abre **http://localhost:5173** y ya puedes hablar con ella. 🎉
 
-> 💡 **Lo mejor:** muchas claves se pegan directamente en el chat y Emma se configura sola, sin que pasen por ningún modelo.
+### Instalación manual
+
+```bash
+pnpm install
+docker compose -f docker-compose.dev.yml up -d
+ollama pull llama3.2:latest        # cerebro local gratuito
+cp .env.example .env               # ya viene listo para Ollama
+pnpm build && pnpm dev
+```
+
+> 💡 **¿Quieres más velocidad?** Añade una clave gratuita de Groq, OpenRouter u OpenCode (opcional) — desde la web o pegándola en el chat, y Emma se configura sola sin que pase por ningún modelo. Pero **sin claves también funciona.**
 
 ## 🔑 Configuración
 
