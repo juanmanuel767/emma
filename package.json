@@ -2,6 +2,10 @@
   "name": "emma",
   "version": "0.1.0",
   "private": true,
+  "description": "Emma — asistente personal de IA privado, local y auto-mejorable (estilo JARVIS).",
+  "author": "Juan Manuel Peralta Chacón <peraltachaconjuanmanuel5@gmail.com>",
+  "license": "SEE LICENSE IN LICENSE",
+  "copyright": "© 2026 Juan Manuel Peralta Chacón. Todos los derechos reservados.",
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"

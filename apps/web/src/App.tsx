@@ -1,3 +1,9 @@
+/**
+ * Emma — © 2026 Juan Manuel Peralta Chacón. Todos los derechos reservados.
+ * Software PROPIETARIO. Prohibido su uso, copia o distribución sin autorización
+ * previa y por escrito del autor (peraltachaconjuanmanuel5@gmail.com). Ver LICENSE.
+ */
+
 import { useState } from 'react';
 import { Sidebar, type Page } from './components/Sidebar.js';
 import { ChatPage } from './pages/ChatPage.js';

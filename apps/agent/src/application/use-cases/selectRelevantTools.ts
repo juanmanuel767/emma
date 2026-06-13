@@ -42,6 +42,7 @@ const DOMAIN_KEYWORDS: Array<{ toolPattern: RegExp; keywords: string[] }> = [
   { toolPattern: /skill|clawhub|openclaw|audit/i, keywords: ['skill', 'skills', 'clawhub', 'openclaw', 'install', 'instala', 'instalar', 'audita', 'auditar', 'auditoria', 'auditoría', 'analiza', 'segura', 'maliciosa', 'vulnerable', 'nexo-brain'] },
   { toolPattern: /emma_(status|restart|logs)/i, keywords: ['estado', 'estás', 'estas', 'sistemas', 'servicios', 'reinicia', 'reiníciate', 'reiniciate', 'reiníciese', 'reiniciar', 'colgado', 'colgada', 'logs', 'registros', 'diagnostica', 'diagnóstico', 'salud', 'operativa', 'operativos'] },
   { toolPattern: /publish_to_github|git-publish/i, keywords: ['sube', 'subir', 'publica', 'publicar', 'repositorio', 'repo', 'github', 'codigo', 'código', 'descargar', 'descarguen', 'readme'] },
+  { toolPattern: /facebook/i, keywords: ['facebook', 'fb', 'postea', 'postear', 'publica en facebook', 'página', 'pagina', 'fanpage', 'fan page', 'muro'] },
 ];
 
 // Generic fallback: overlap between message words and the tool's own name/description

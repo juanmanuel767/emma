@@ -9,7 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-monorepo-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node](https://img.shields.io/badge/Node-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-workspace-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Propietaria-red.svg)](LICENSE)
 
 </div>
 
@@ -85,13 +85,15 @@ Las claves van en `.env` (copia `.env.example`). Casi todas son **opcionales** �
 - `EMAIL_USER` / `EMAIL_PASSWORD` — correo (App Password de Gmail)
 - `DATABASE_URL`, `REDIS_URL` — infraestructura
 
-## 🤝 Contribuir
+## 📜 Licencia y propiedad
 
-Las contribuciones son bienvenidas. Abre un *issue* o un *pull request*.
+**© 2026 Juan Manuel Peralta Chacón — Todos los derechos reservados.**
 
-## 📜 Licencia
+Este proyecto es **propietario**. Emma es propiedad exclusiva de su autor.
+**No** está permitido copiar, usar, modificar ni distribuir este software sin
+autorización previa y por escrito del autor. Consulta el archivo [LICENSE](LICENSE).
 
-MIT — úsalo, modifícalo y haz tu propia Emma.
+Para solicitar permiso de uso: peraltachaconjuanmanuel5@gmail.com
 
 ---
 
