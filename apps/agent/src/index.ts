@@ -37,6 +37,7 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().transform((v) => v || undefined).optional(),
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
   OLLAMA_MODEL: z.string().default('llama3.2:1b'),
+  OLLAMA_HEAVY_MODEL: z.string().default('qwen2.5:3b'),
   GROQ_API_KEY: z.string().transform((v) => v || undefined).optional(),
   GROQ_MODEL: z.string().default('qwen/qwen3-32b'),
   OPENAI_API_KEY: z.string().transform((v) => v || undefined).optional(),
@@ -68,7 +69,7 @@ const envSchema = z.object({
 
 function buildProviderManager(env: z.infer<typeof envSchema>): LLMProviderManager {
   // Always include Ollama as the ultimate fallback
-  const ollama = new OllamaAdapter(env.OLLAMA_BASE_URL, env.OLLAMA_MODEL);
+  const ollama = new OllamaAdapter(env.OLLAMA_BASE_URL, env.OLLAMA_MODEL, env.OLLAMA_HEAVY_MODEL);
   const providers: Array<{ name: string; adapter: import('@emma/core/ports').ILLMAdapter; model?: string }> = [];
 
   // Add cloud providers in priority order
