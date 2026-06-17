@@ -195,9 +195,28 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
         throw new QuotaExhaustedError(this.#providerName, message);
       }
       // Tool call malformado generado por el modelo (error estocástico) — saltar al siguiente
-      // proveedor en lugar de devolver el error al usuario
-      if (status === 400 && (message.includes('tool_use_failed') || message.includes('Failed to call a function'))) {
+      // proveedor en lugar de devolver el error al usuario. NO exigir status===400: el SDK de
+      // Groq a veces entrega este fallo durante el streaming sin la propiedad `status`, y entonces
+      // el error crudo se colaba hasta el usuario. La firma del mensaje basta para reconocerlo.
+      if (
+        message.includes('tool_use_failed') ||
+        message.includes('Failed to call a function') ||
+        message.includes('failed_generation') ||
+        message.includes('tool call validation failed') ||
+        (message.includes('tool') && message.includes('validation failed'))
+      ) {
         throw new QuotaExhaustedError(this.#providerName, `tool call malformado: ${message.slice(0, 120)}`);
+      }
+      // Parámetro no soportado por ESTE modelo (p.ej. groq/algún free: "422 parallel_tool_calls
+      // is not supported"). Es permanente para el modelo → saltar al siguiente proveedor en vez
+      // de romper el turno. Antes este 422 se colaba sin clasificar y mataba la conversación.
+      if (
+        status === 422 ||
+        message.includes('parallel_tool_calls') ||
+        message.includes('unprocessable') ||
+        (message.includes('is not supported') && message.includes('tool'))
+      ) {
+        throw new QuotaExhaustedError(this.#providerName, `parámetro no soportado: ${message.slice(0, 120)}`);
       }
     }
   }

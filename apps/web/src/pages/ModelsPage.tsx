@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchModels, selectModel, type ModelsInfo, type ProviderCatalog } from '../services/api.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  fetchModels,
+  selectModel,
+  fetchInstalledModels,
+  fetchRecommendedModels,
+  pullModel,
+  deleteModel,
+  type ModelsInfo,
+  type ProviderCatalog,
+  type InstalledModel,
+  type RecommendedModel,
+  type PullProgress,
+} from '../services/api.js';
 
 function displayName(name: string, model?: string): string {
   if (name.startsWith('openrouter:')) return name.slice('openrouter:'.length);
@@ -73,6 +85,9 @@ export function ModelsPage() {
         </div>
       )}
 
+      {/* Gestor de modelos locales (Ollama) */}
+      <ModelManagerSection />
+
       {/* Fallback chain */}
       <section>
         <h2 className="font-mono text-xs uppercase tracking-widest text-gray-500 mb-2">
@@ -140,6 +155,238 @@ export function ModelsPage() {
         ))}
       </section>
     </div>
+  );
+}
+
+function fmtBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 GB';
+  const gb = bytes / 1e9;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${(bytes / 1e6).toFixed(0)} MB`;
+}
+
+// Estado de descarga por modelo
+type PullState = { progress: PullProgress | null; ctrl: AbortController };
+
+function ModelManagerSection() {
+  const [recommended, setRecommended] = useState<RecommendedModel[]>([]);
+  const [installed, setInstalled] = useState<InstalledModel[]>([]);
+  const [hardware, setHardware] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pulls, setPulls] = useState<Record<string, PullState>>({});
+  const pullsRef = useRef(pulls);
+  pullsRef.current = pulls;
+
+  const load = useCallback(async () => {
+    try {
+      const [rec, inst] = await Promise.all([fetchRecommendedModels(), fetchInstalledModels()]);
+      setRecommended(rec.models);
+      setHardware(rec.hardware);
+      setInstalled(inst);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const install = useCallback(
+    async (name: string) => {
+      const ctrl = new AbortController();
+      setPulls((p) => ({ ...p, [name]: { progress: null, ctrl } }));
+      try {
+        await pullModel(
+          name,
+          (progress) => setPulls((p) => (p[name] ? { ...p, [name]: { ...p[name]!, progress } } : p)),
+          ctrl.signal,
+        );
+        await load();
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') setError((err as Error).message);
+      } finally {
+        setPulls((p) => {
+          const { [name]: _removed, ...rest } = p;
+          return rest;
+        });
+      }
+    },
+    [load],
+  );
+
+  const cancel = useCallback((name: string) => {
+    pullsRef.current[name]?.ctrl.abort();
+  }, []);
+
+  const remove = useCallback(
+    async (name: string) => {
+      if (!confirm(`¿Eliminar el modelo "${name}" del disco?`)) return;
+      try {
+        await deleteModel(name);
+        await load();
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [load],
+  );
+
+  // Modelos instalados que NO están en la lista de recomendados (para no duplicar)
+  const recIds = useMemo(
+    () => new Set(recommended.flatMap((r) => [r.id, `${r.id}:latest`])),
+    [recommended],
+  );
+  const otherInstalled = useMemo(
+    () => installed.filter((m) => !recIds.has(m.name)),
+    [installed, recIds],
+  );
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="font-mono text-xs uppercase tracking-widest text-gray-500">
+          Gestor de Modelos · locales (Ollama)
+        </h2>
+        <p className="text-[11px] text-gray-600 mt-1">
+          Instale, actualice o elimine modelos locales. Funcionan sin clave ni internet; la
+          velocidad depende de su hardware.
+        </p>
+        {hardware && (
+          <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded border border-ink-700 bg-ink-950">
+            <span className="inline-block w-2 h-2 rounded-full bg-bee" />
+            <span className="font-mono text-[11px] text-gray-400">Tu equipo: {hardware}</span>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="px-3 py-2 text-xs text-red-300 bg-red-900/30 border border-red-700 rounded">
+          {error}
+        </div>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {recommended.map((m) => {
+          const pull = pulls[m.id];
+          const sizeBytes = installed.find((i) => i.name === m.id || i.name === `${m.id}:latest`)?.sizeBytes;
+          return (
+            <div
+              key={m.id}
+              className="rounded-lg border border-ink-700 bg-ink-900 p-3 flex flex-col gap-2"
+            >
+              <div className="flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-gray-100 truncate">{m.label}</div>
+                  <div className="text-[10px] font-mono text-gray-600">{m.id}</div>
+                </div>
+                {m.installed ? (
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400 border border-emerald-800 shrink-0">
+                    INSTALADO
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-gray-500 border border-ink-700 shrink-0">
+                    {m.role}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex gap-4 text-[10px] font-mono text-gray-500 items-center">
+                <span>{m.installed && sizeBytes ? fmtBytes(sizeBytes) : `~${m.sizeGB} GB`}</span>
+                <span>RAM ≥ {m.minRamGB} GB</span>
+                <span className="text-gray-600">ollama</span>
+                {!m.fits ? (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 border border-red-800">
+                    Requiere más RAM
+                  </span>
+                ) : m.heavy ? (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800">
+                    lento en tu CPU
+                  </span>
+                ) : (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400 border border-emerald-800">
+                    apto
+                  </span>
+                )}
+              </div>
+
+              {pull ? (
+                <div className="space-y-1">
+                  <div className="h-2 rounded bg-ink-800 overflow-hidden">
+                    <div
+                      className="h-full bg-bee transition-all duration-300"
+                      style={{ width: `${pull.progress?.percent ?? 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                    <span className="truncate">{pull.progress?.status ?? 'iniciando…'}</span>
+                    <span className="shrink-0 ml-2">
+                      {pull.progress?.percent != null ? `${pull.progress.percent}%` : ''}
+                      {pull.progress && pull.progress.total > 0
+                        ? ` · ${fmtBytes(pull.progress.completed)}/${fmtBytes(pull.progress.total)}`
+                        : ''}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => cancel(m.id)}
+                    className="text-[10px] font-mono px-2 py-1 rounded border border-ink-700 text-gray-500 hover:border-red-700 hover:text-red-400 transition-colors"
+                  >
+                    cancelar
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void install(m.id)}
+                    disabled={!m.fits && !m.installed}
+                    title={!m.fits && !m.installed ? 'Tu equipo no tiene RAM suficiente' : ''}
+                    className="flex-1 text-xs font-mono px-3 py-1.5 rounded border border-ink-700 text-gray-300 hover:border-bee hover:text-bee-glow transition-colors disabled:opacity-40 disabled:hover:border-ink-700 disabled:hover:text-gray-300"
+                  >
+                    {m.installed ? 'Actualizar' : 'Instalar'}
+                  </button>
+                  {m.installed && (
+                    <button
+                      onClick={() => void remove(m.id)}
+                      className="text-xs font-mono px-3 py-1.5 rounded border border-ink-700 text-gray-500 hover:border-red-700 hover:text-red-400 transition-colors"
+                    >
+                      Eliminar
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {otherInstalled.length > 0 && (
+        <div className="space-y-1">
+          <h3 className="font-mono text-[10px] uppercase tracking-widest text-gray-600 mt-2">
+            Otros instalados
+          </h3>
+          <div className="rounded-lg border border-ink-700 bg-ink-900 divide-y divide-ink-800">
+            {otherInstalled.map((m) => (
+              <div key={m.name} className="flex items-center gap-3 px-4 py-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-gray-200 truncate">{m.name}</div>
+                  <div className="text-[10px] font-mono text-gray-600">
+                    {m.paramSize ?? ''} {m.quant ? `· ${m.quant}` : ''}
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono text-gray-500 shrink-0">{m.size}</span>
+                <button
+                  onClick={() => void remove(m.name)}
+                  className="text-[10px] font-mono px-2 py-1 rounded border border-ink-700 text-gray-500 hover:border-red-700 hover:text-red-400 transition-colors shrink-0"
+                >
+                  Eliminar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,0 +1,43 @@
+# Pruebas de rendimiento — Emma QA
+# Definen los umbrales de aprobación y un conjunto de sondas representativas.
+# El runner mide latencia (media/máx), nº de pasos (herramientas) y marca cada sonda
+# contra su presupuesto de latencia individual.
+version: 2
+category_group: performance
+
+# Umbrales globales aplicados sobre el conjunto FUNCIONAL completo.
+thresholds:
+  avg_ms_max: 6000        # latencia media tolerable
+  p95_ms_max: 15000       # p95 tolerable
+  empty_rate_max: 5.0     # % de respuestas vacías tolerable
+  latency_regression_pct: 30   # +30% sobre baseline => REQUIERE REVISION
+
+# Sondas con presupuesto individual (budget_ms). Miden el coste por tipo de tarea.
+cases:
+  - id: PERF-01
+    cat: rendimiento
+    kind: simple_qa
+    budget_ms: 4000
+    prompt: "Responde solo con un numero: cuanto es 12 + 30?"
+    check: {contains_any: ["42"]}
+
+  - id: PERF-02
+    cat: rendimiento
+    kind: memory_lookup
+    budget_ms: 6000
+    prompt: "En que ciudad vivo? Responde en pocas palabras."
+    check: {contains_any: ["neiva"]}
+
+  - id: PERF-03
+    cat: rendimiento
+    kind: single_tool
+    budget_ms: 12000
+    prompt: "Dame la fecha y hora actual."
+    check: {tool: get_datetime, nonempty: true}
+
+  - id: PERF-04
+    cat: rendimiento
+    kind: generation
+    budget_ms: 12000
+    prompt: "Explica en 2 frases que es una base de datos."
+    check: {contains_any: ["datos", "informacion", "almacen", "tabla"]}

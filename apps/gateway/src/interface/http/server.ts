@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import type { AgentClient } from '../../infrastructure/agent-client/AgentClient.js';
 import { chatRoutes } from './routes/chat.js';
 import { settingsRoutes } from './routes/settings.js';
+import { modelManagerRoutes } from './routes/models-manager.js';
 import { createLogger } from '@emma/shared/logger';
 
 const logger = createLogger('gateway-server');
@@ -14,6 +15,7 @@ export async function buildGateway(deps: {
   jwtSecret: string;
   port: number;
   redisUrl: string;
+  ollamaBaseUrl: string;
 }) {
   const app = Fastify({ logger: false, trustProxy: true });
 
@@ -46,6 +48,7 @@ export async function buildGateway(deps: {
 
   await app.register(chatRoutes, { agentClient: deps.agentClient });
   await app.register(settingsRoutes);
+  await app.register(modelManagerRoutes, { ollamaBaseUrl: deps.ollamaBaseUrl });
 
   return {
     start: async () => {

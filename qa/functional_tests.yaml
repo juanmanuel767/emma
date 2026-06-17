@@ -1,0 +1,217 @@
+# Casos funcionales versionados — Emma QA
+# Cada caso es auto-calificable: checks objetivos (contains_all/contains_any/regex/tool/no_tool).
+# Verdicts: Exito (1.0) / Parcial (0.5) / Fallo (0.0).
+version: 2
+category_group: functional
+
+# Generador determinista de matemáticas (semilla fija → reproducible).
+# El runner expande esto en N casos MAT-XX con respuesta calculada.
+generators:
+  - type: math
+    id_prefix: MAT
+    seed: 42
+    count: 38
+    a_range: [120, 9999]
+    b_range: [12, 999]
+    ops: ["+", "-", "*"]
+
+cases:
+  # ── Matemáticas fijas (porcentajes) ─────────────────────────────────────────
+  - id: MAT-39
+    cat: matematicas
+    prompt: "Cuanto es el 15% de 2.400.000?"
+    check: {contains_any: ["360000", "360.000"]}
+  - id: MAT-40
+    cat: matematicas
+    prompt: "Si algo cuesta 80.000 y tiene 25% de descuento, cuanto pago?"
+    check: {contains_any: ["60000", "60.000"]}
+
+  # ── Programación ────────────────────────────────────────────────────────────
+  - id: PRG-01
+    cat: programacion
+    prompt: "Escribe una funcion en Python que invierta una cadena. Solo el codigo."
+    check: {contains_any: ["def ", "[::-1]", "return"]}
+  - id: PRG-02
+    cat: programacion
+    prompt: "Escribe en JavaScript una funcion que diga si un numero es par."
+    check: {contains_any: ["function", "=>", "% 2"]}
+  - id: PRG-03
+    cat: programacion
+    prompt: "Dame una consulta SQL que seleccione los usuarios mayores de 18 de la tabla users."
+    check: {contains_all: ["select"], contains_any: ["where", "18"]}
+  - id: PRG-04
+    cat: programacion
+    prompt: "Escribe un bucle for en Python que imprima del 1 al 5."
+    check: {contains_any: ["for ", "range"]}
+  - id: PRG-05
+    cat: programacion
+    prompt: "Que hace este codigo: [x*2 for x in range(3)] ? Y cual es el resultado?"
+    check: {contains_any: ["0, 2, 4", "[0, 2, 4]", "duplica", "multiplica"]}
+  - id: PRG-06
+    cat: programacion
+    prompt: "Forja una herramienta que codifique texto a base64 y codifica 'Emma'."
+    check: {contains_any: ["RW1tYQ=="], tool: forge_tool}
+
+  # ── Análisis de texto ───────────────────────────────────────────────────────
+  - id: TXT-01
+    cat: analisis_texto
+    prompt: "Cuantas palabras tiene esta frase: 'el sol brilla sobre el mar azul'?"
+    check: {contains_any: ["7", "siete"]}
+  - id: TXT-02
+    cat: analisis_texto
+    prompt: "El sentimiento de 'estoy furioso, esto es un desastre' es positivo o negativo?"
+    check: {contains_any: ["negativo"]}
+  - id: TXT-03
+    cat: analisis_texto
+    prompt: "Extrae el email de: 'contactame en juan.perez@empresa.com manana'."
+    check: {contains_any: ["juan.perez@empresa.com"]}
+  - id: TXT-04
+    cat: analisis_texto
+    prompt: "Corrige la ortografia: 'oi boi a komer kon mi ermano'."
+    check: {contains_all: ["hoy"], contains_any: ["comer"]}
+  - id: TXT-05
+    cat: analisis_texto
+    prompt: "Traduce al ingles: 'el perro corre rapido'."
+    check: {contains_any: ["dog", "runs", "fast"]}
+  - id: TXT-06
+    cat: analisis_texto
+    prompt: "Cual es la palabra mas larga en 'casa elefante sol perro'?"
+    check: {contains_any: ["elefante"]}
+
+  # ── Búsquedas web ───────────────────────────────────────────────────────────
+  - id: WEB-01
+    cat: busqueda_web
+    prompt: "Busca en internet la capital de Australia."
+    check: {contains_any: ["canberra"], soft: true}
+  - id: WEB-02
+    cat: busqueda_web
+    prompt: "Busca noticias recientes sobre inteligencia artificial."
+    check: {nonempty: true, soft: true}
+  - id: WEB-03
+    cat: busqueda_web
+    prompt: "Cual es la moneda oficial de Japon? Busca si lo necesitas."
+    check: {contains_any: ["yen"]}
+  - id: WEB-04
+    cat: busqueda_web
+    prompt: "Busca el precio actual del bitcoin en dolares."
+    check: {nonempty: true, tool: get_bitcoin_price, soft: true}
+
+  # ── Resumen ─────────────────────────────────────────────────────────────────
+  - id: SUM-01
+    cat: resumen
+    prompt: "Resume en una frase: 'La fotosintesis es el proceso por el cual las plantas convierten la luz solar, el agua y el CO2 en glucosa y oxigeno.'"
+    check: {contains_any: ["plantas", "luz", "glucosa", "energia", "oxigeno"]}
+  - id: SUM-02
+    cat: resumen
+    prompt: "Resume en 3 puntos clave que es el cifrado TLS."
+    check: {contains_any: ["cifr", "seguridad", "certificad", "datos"]}
+  - id: SUM-03
+    cat: resumen
+    prompt: "Dame el TL;DR de que es Docker en una linea."
+    check: {contains_any: ["contenedor", "container", "aisla", "empaqueta"]}
+
+  # ── Memoria (perfil curado) ─────────────────────────────────────────────────
+  - id: MEM-01
+    cat: memoria
+    prompt: "Cual es mi color favorito?"
+    check: {contains_any: ["verde"], no_tool: ["web_search", "browser"]}
+  - id: MEM-02
+    cat: memoria
+    prompt: "A que me dedico?"
+    check: {contains_any: ["dron", "puma", "supervisor", "seguridad"]}
+  - id: MEM-03
+    cat: memoria
+    prompt: "Cual es mi usuario de GitHub?"
+    check: {contains_any: ["juanmanuel767"]}
+  - id: MEM-04
+    cat: memoria
+    prompt: "En que ciudad vivo?"
+    check: {contains_any: ["neiva"]}
+  - id: MEM-05
+    cat: memoria
+    prompt: "Como se llama mi asistente?"
+    check: {contains_any: ["emma"]}
+  - id: MEM-06
+    cat: memoria
+    prompt: "Que lenguajes de programacion uso?"
+    check: {contains_any: ["rust", "python", "javascript", "typescript"]}
+
+  # ── Automatización (solo lecturas / sin efectos destructivos) ───────────────
+  - id: AUT-01
+    cat: automatizacion
+    prompt: "A quien le respondo automaticamente en WhatsApp?"
+    check: {tool: whatsapp_list_automated, contains_any: ["reina", "aleja"]}
+  - id: AUT-02
+    cat: automatizacion
+    prompt: "Estoy conectado a WhatsApp?"
+    check: {tool: whatsapp_status, contains_any: ["conect", "saray", "si"]}
+  - id: AUT-03
+    cat: automatizacion
+    prompt: "Que clima hace ahora?"
+    check: {tool: get_weather, contains_any: ["°", "grados", "neiva", "temperatura"]}
+  - id: AUT-04
+    cat: automatizacion
+    prompt: "Estan operativos tus servicios?"
+    check: {tool: emma_status, contains_any: ["activ", "operativ", "agent"]}
+  - id: AUT-05
+    cat: automatizacion
+    prompt: "Redacta (NO envies) un correo de cumpleanos breve para un amigo."
+    check: {contains_any: ["feliz", "cumple"]}
+
+  # ── Planificación ───────────────────────────────────────────────────────────
+  - id: PLN-01
+    cat: planificacion
+    prompt: "Dame un plan de 5 pasos para organizar una mudanza."
+    check: {contains_any: ["1", "paso", "primero"], regex: '(\d[\).]|paso)'}
+  - id: PLN-02
+    cat: planificacion
+    prompt: "Como dividirias el proyecto de crear una app de notas? Lista las fases."
+    check: {contains_any: ["diseñ", "desarrollo", "backend", "frontend", "fase", "base de datos"]}
+  - id: PLN-03
+    cat: planificacion
+    prompt: "Planifica una rutina de estudio semanal para aprender Rust."
+    check: {contains_any: ["lunes", "semana", "dia", "hora", "rust"]}
+
+  # ── Explicaciones técnicas ──────────────────────────────────────────────────
+  - id: EXP-01
+    cat: explicacion
+    prompt: "Explica que es una API REST en terminos simples."
+    check: {contains_any: ["http", "peticion", "recurso", "endpoint", "servidor"]}
+  - id: EXP-02
+    cat: explicacion
+    prompt: "Que diferencia hay entre HTTP y HTTPS?"
+    check: {contains_any: ["cifr", "ssl", "tls", "seguro", "443"]}
+  - id: EXP-03
+    cat: explicacion
+    prompt: "Explica que es la recursividad en programacion."
+    check: {contains_any: ["a si misma", "se llama", "caso base", "funcion"]}
+  - id: EXP-04
+    cat: explicacion
+    prompt: "Que es el phishing y como lo detecto?"
+    check: {contains_any: ["suplant", "enlace", "estafa", "correo", "url"]}
+
+  # ── Resolución de problemas (multi-paso / herramientas) ─────────────────────
+  - id: SOL-01
+    cat: resolucion
+    prompt: "Cuantos pesos colombianos son 75 dolares?"
+    check: {contains_any: ["peso", "cop", "$"], tool: convert_currency}
+  - id: SOL-02
+    cat: resolucion
+    prompt: "Revisa el certificado SSL de github.com y dime cuando expira."
+    check: {tool: check_ssl_cert, contains_any: ["agosto", "2026", "expir", "venc"]}
+  - id: SOL-03
+    cat: resolucion
+    prompt: "La contrasena 'qwerty' es segura? Verifica si esta filtrada."
+    check: {tool: check_password_breach, contains_any: ["filtr", "comprometid", "veces", "no"]}
+  - id: SOL-04
+    cat: resolucion
+    prompt: "Generame una contrasena segura de 16 caracteres."
+    check: {tool: generate_secure_password, nonempty: true}
+  - id: SOL-05
+    cat: resolucion
+    prompt: "Que dia de la semana es hoy y que hora es?"
+    check: {tool: get_datetime, nonempty: true}
+  - id: SOL-06
+    cat: resolucion
+    prompt: "Cuanto es 0.05 BTC en dolares al precio actual?"
+    check: {tool: get_bitcoin_price, nonempty: true, soft: true}

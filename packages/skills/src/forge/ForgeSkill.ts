@@ -5,6 +5,7 @@ import { createLogger } from '@emma/shared/logger';
 import type { ITool } from '@emma/tools';
 import type { ISkill } from '../types.js';
 import type { SkillRegistry } from '../SkillRegistry.js';
+import { inspectSkillSecurity } from '../security/SkillSecurity.js';
 
 const logger = createLogger('ForgeSkill');
 
@@ -174,6 +175,19 @@ WRONG (inner function never called!):
         const { code, rewrote } = rewriteInnerFunctions(rawCode);
         if (rewrote.length > 0) {
           logger.info({ functions: rewrote, skill: skill_name }, 'Auto-fixed inner function declarations to const arrows');
+        }
+
+        const unsafeReason = inspectSkillSecurity({
+          skillName: skill_name,
+          toolName: tool_name,
+          description,
+          code,
+        });
+        if (unsafeReason) {
+          return {
+            success: false,
+            error: `Tool rejected by safety policy: ${unsafeReason}. I cannot create tools that read secrets, private keys, sensitive system files, or bypass command/file permissions.`,
+          };
         }
 
         // Step 2: Syntax-check using AsyncFunction so 'await' is valid

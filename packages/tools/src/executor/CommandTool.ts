@@ -12,8 +12,10 @@ const inputSchema = z.object({
 type Input = z.infer<typeof inputSchema>;
 
 const ALLOWED_COMMANDS = new Set([
+  // `env`/`printenv` quedan FUERA a propósito: el proceso del agente tiene todas las
+  // claves (GROQ, OPENCODE, TELEGRAM, DATABASE_URL…) en process.env; volcarlas = fuga.
   'ls', 'cat', 'pwd', 'echo', 'find', 'grep', 'git', 'node', 'npm',
-  'pnpm', 'curl', 'wget', 'df', 'du', 'ps', 'env', 'which', 'date',
+  'pnpm', 'curl', 'wget', 'df', 'du', 'ps', 'which', 'date',
   'wc', 'head', 'tail', 'sort', 'uniq', 'cut', 'tr', 'sed', 'awk',
   'mkdir', 'touch', 'cp', 'mv', 'diff', 'tar', 'zip', 'unzip',
   'gh',
@@ -28,9 +30,16 @@ const BLOCKED_PATTERNS = [
   /eval\s*\(/,
   /chmod\s+777/,
   /\/dev\/null.*rm/,
+  // Volcado de variables de entorno por otras vías (set, printenv, declare, /proc/self/environ).
+  /\b(printenv|set|declare|export)\b/,
+  /\/proc\/\d*\/environ/,
 ];
 
 const BLOCKED_PATHS = ['/etc/shadow', '/etc/passwd', '/root/.ssh', '/home/user/.ssh'];
+
+// Archivos cuyo CONTENIDO es secreto: nunca leerlos por comando, sea cual sea el verbo
+// (cat/head/tail/grep/sed/awk/cut/sort/diff/find…). Se evalúa sobre cada argumento.
+const SECRET_FILE_RE = /(^|\/)\.env(\.|$)|\.env$|(^|\/)\.env(\.[\w-]+)?$|\.(pem|key|p12|pfx)$|(^|\/)(id_rsa|id_ed25519|id_dsa|credentials|\.npmrc|\.pgpass|\.netrc)$/i;
 const MAX_EXECUTION_MS = 15_000;
 
 export class CommandTool implements ITool<Input, string> {
@@ -108,6 +117,13 @@ export class CommandTool implements ITool<Input, string> {
       if (BLOCKED_PATHS.some((p) => blocked.startsWith(p))) {
         throw new PermissionDeniedError(`access path '${blocked}'`);
       }
+      if (SECRET_FILE_RE.test(blocked)) {
+        throw new PermissionDeniedError(`read secret file '${blocked}'`);
+      }
+    }
+    // El secreto puede ir embebido en el propio `command` (p.ej. cat .env mal tokenizado).
+    if (SECRET_FILE_RE.test(fullCommand)) {
+      throw new PermissionDeniedError(`read secret file`);
     }
   }
 }

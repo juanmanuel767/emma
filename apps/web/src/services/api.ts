@@ -166,6 +166,122 @@ export async function fetchConversationMessages(
   return res.json() as Promise<{ conversation: ConversationSummary; messages: ConversationMessage[] }>;
 }
 
+// ── Gestor de Modelos (Ollama) ───────────────────────────────────────────────
+
+export interface InstalledModel {
+  name: string;
+  provider: string;
+  sizeBytes: number;
+  size: string;
+  family: string | null;
+  paramSize: string | null;
+  quant: string | null;
+  modifiedAt: string | null;
+}
+
+export interface RecommendedModel {
+  id: string;
+  label: string;
+  sizeGB: number;
+  minRamGB: number;
+  role: string;
+  provider: string;
+  installed: boolean;
+  fits: boolean;   // la RAM alcanza
+  heavy: boolean;  // cabe pero será lento en esta CPU (sin GPU, ≥4 GB)
+}
+
+export interface PullProgress {
+  status: string;
+  completed: number;
+  total: number;
+  percent: number | null;
+}
+
+export async function fetchInstalledModels(): Promise<InstalledModel[]> {
+  const res = await fetch(`${GATEWAY_URL}/ollama/installed`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Error ${res.status}`);
+  }
+  return ((await res.json()) as { models: InstalledModel[] }).models;
+}
+
+export async function fetchRecommendedModels(): Promise<{ hardware: string; models: RecommendedModel[] }> {
+  const res = await fetch(`${GATEWAY_URL}/ollama/recommended`);
+  if (!res.ok) throw new Error(`Error ${res.status} al obtener recomendados`);
+  return (await res.json()) as { hardware: string; models: RecommendedModel[] };
+}
+
+export interface OnboardingInfo {
+  ollamaAvailable: boolean;
+  hardware: string;
+  recommended: {
+    id: string;
+    label: string;
+    sizeGB: number;
+    minRamGB: number;
+    role: string;
+    installed: boolean;
+  } | null;
+}
+
+export async function fetchOnboarding(): Promise<OnboardingInfo> {
+  const res = await fetch(`${GATEWAY_URL}/onboarding`);
+  if (!res.ok) throw new Error(`Error ${res.status} al obtener onboarding`);
+  return (await res.json()) as OnboardingInfo;
+}
+
+export async function deleteModel(name: string): Promise<void> {
+  const res = await fetch(`${GATEWAY_URL}/ollama/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Error ${res.status}`);
+  }
+}
+
+/** Instala/actualiza un modelo de Ollama, reportando el progreso de descarga. */
+export async function pullModel(
+  name: string,
+  onProgress: (p: PullProgress) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${GATEWAY_URL}/ollama/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    signal,
+  });
+  if (!response.ok || !response.body) throw new Error(`Error ${response.status} al instalar`);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentEvent = 'message';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith('data: ')) {
+        const data = JSON.parse(line.slice(6)) as PullProgress & { error?: string };
+        if (currentEvent === 'error') throw new Error(data.error ?? 'Error de instalación');
+        if (currentEvent === 'done') return;
+        if (currentEvent === 'progress') onProgress(data);
+      }
+    }
+  }
+}
+
 export async function* streamChat(
   message: string,
   sessionId: string,

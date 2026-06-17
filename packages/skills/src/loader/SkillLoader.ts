@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { createLogger } from '@emma/shared/logger';
 import type { ITool, ToolContext } from '@emma/tools';
 import type { ISkill, SkillManifest } from '../types.js';
+import { assertSkillSafe } from '../security/SkillSecurity.js';
+import { runForgedInSandbox } from '../sandbox/forgeSandbox.js';
 
 const logger = createLogger('SkillLoader');
 
@@ -32,21 +34,30 @@ function isForgedFormat(mod: unknown): mod is ForgedSkillModule {
   return typeof first['execute'] === 'function' && !('inputSchema' in first);
 }
 
-function wrapForgedSkill(mod: ForgedSkillModule): ISkill {
-  const tools: ITool[] = mod.tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: z.record(z.unknown()),
-    jsonSchema: t.parameters ?? { type: 'object', properties: {} },
-    execute: async (input: unknown, ctx: ToolContext) => {
-      try {
-        const result = await t.execute(input, ctx);
+function wrapForgedSkill(mod: ForgedSkillModule, entryPath: string): ISkill {
+  for (const t of mod.tools) {
+    assertSkillSafe({
+      skillName: mod.name,
+      toolName: t.name,
+      description: `${mod.description}\n${t.description}`,
+      code: String(t.execute),
+    });
+  }
+
+  const tools: ITool[] = mod.tools.map((t) => {
+    // El código forjado se ejecuta AISLADO en un subproceso sin secretos: el sandbox importa el
+    // MÓDULO COMPLETO por su ruta (preservando imports y helpers de ámbito) y llama esta tool.
+    return {
+      name: t.name,
+      description: t.description,
+      inputSchema: z.record(z.unknown()),
+      jsonSchema: t.parameters ?? { type: 'object', properties: {} },
+      execute: async (input: unknown, ctx: ToolContext) => {
+        const result = await runForgedInSandbox(entryPath, t.name, input, ctx);
         return result ?? { success: true, data: null };
-      } catch (err) {
-        return { success: false, error: String(err) };
-      }
-    },
-  }));
+      },
+    };
+  });
 
   return {
     name: mod.name,
@@ -101,6 +112,13 @@ export class SkillLoader {
     }
 
     const entryPath = resolve(skillPath, manifest.entry);
+    const source = await readFile(entryPath, 'utf-8');
+    assertSkillSafe({
+      skillName: manifest.name,
+      description: manifest.description,
+      code: source,
+    });
+
     // Cache-bust with timestamp so hot-reload picks up new code
     const importUrl = cacheBust
       ? `file://${entryPath}?v=${Date.now()}`
@@ -114,7 +132,7 @@ export class SkillLoader {
 
     // Detect and wrap forged-format skills
     if (isForgedFormat(mod.default)) {
-      return wrapForgedSkill(mod.default as ForgedSkillModule);
+      return wrapForgedSkill(mod.default as ForgedSkillModule, entryPath);
     }
 
     return mod.default as ISkill;

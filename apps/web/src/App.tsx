@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { Sidebar, type Page } from './components/Sidebar.js';
+import { OnboardingBanner } from './components/OnboardingBanner.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { HistoryPage } from './pages/HistoryPage.js';
 import { ModelsPage } from './pages/ModelsPage.js';
@@ -20,6 +21,7 @@ export function App() {
     <div className="flex h-screen bg-ink-950 text-gray-100">
       <Sidebar page={page} onNavigate={setPage} />
       <main className="flex-1 flex flex-col min-w-0">
+        <OnboardingBanner />
         {page === 'chat' && <ChatPage />}
         {page === 'history' && <HistoryPage />}
         {page === 'models' && <ModelsPage />}

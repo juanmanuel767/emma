@@ -17,6 +17,7 @@ const envSchema = z.object({
   AGENT_SERVICE_URL: z.string().url().default('http://localhost:3001'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
   JWT_SECRET: z.string().min(32),
+  OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });
 
@@ -30,6 +31,7 @@ async function main() {
     jwtSecret: env.JWT_SECRET,
     port: env.GATEWAY_PORT,
     redisUrl: env.REDIS_URL,
+    ollamaBaseUrl: env.OLLAMA_BASE_URL,
   });
 
   const shutdown = async () => {

@@ -28,21 +28,29 @@ const TOOL_KEYWORDS: Record<string, string[]> = {
   run_security_tool: ['nmap', 'nikto', 'whatweb', 'sqlmap', 'gobuster', 'sslscan', 'masscan', 'nuclei', 'httpx', 'subfinder', 'trivy', 'lynis', 'escanea', 'escaneo', 'escanear', 'scan', 'puerto', 'puertos', 'vulnerabilidad', 'vulnerabilidades', 'pentest', 'fingerprint', 'recon', 'subdominios', 'analiza web', 'auditar web'],
   ensure_security_tool: ['instala', 'instalar', 'descarga', 'descargar', 'herramienta'],
   list_security_tools: ['herramientas de seguridad', 'qué herramientas', 'que herramientas', 'catálogo', 'catalogo', 'arsenal'],
+  forget_fact: ['olvida', 'olvídalo', 'olvidalo', 'olvídate', 'olvidate', 'borra de mi perfil', 'borra que', 'ya no vivo', 'ya no', 'elimina de mi perfil', 'no recuerdes', 'deja de recordar', 'equivocado', 'corrige', 'ya no me gusta'],
+  list_known_facts: ['qué sabes de mí', 'que sabes de mi', 'qué sabes de mi', 'qué recuerdas', 'que recuerdas', 'qué recuerdas de mí', 'mi perfil', 'de dónde sabes', 'de donde sabes', 'cómo sabes', 'como sabes', 'qué tienes de mí', 'que tienes de mi', 'mis datos'],
 };
 
 // Domain keywords matched against the TOOL's name/description (not per tool name),
 // so dynamically forged tools (speak_text, take_photo, …) still get selected.
 const DOMAIN_KEYWORDS: Array<{ toolPattern: RegExp; keywords: string[] }> = [
   { toolPattern: /speak|tts|voice|voz|audio|say/i, keywords: ['habla', 'hablar', 'háblame', 'hablame', 'voz', 'dime', 'audio', 'speak', 'voice', 'pronuncia', 'escuchar', 'oír', 'oir'] },
-  { toolPattern: /photo|camera|cam\b|foto|imagen|image|vision/i, keywords: ['foto', 'cámara', 'camara', 'mira', 'ves', 'photo', 'picture', 'webcam', 'captura', 'imagen', 'image', 'describe'] },
+  { toolPattern: /photo|camera|cam\b|foto|imagen|image|vision/i, keywords: ['foto', 'cámara', 'camara', 'mira', 'mírame', 'mirame', 'ves', 'verme', 'véme', 'veme', 'me ves', 'puedes ver', 'qué ves', 'que ves', 'obsérvame', 'observame', 'photo', 'picture', 'webcam', 'captura', 'imagen', 'image', 'describe'] },
   { toolPattern: /weather|clima/i, keywords: ['clima', 'lluvia', 'temperatura', 'weather', 'pronóstico', 'pronostico'] },
   { toolPattern: /bitcoin|crypto/i, keywords: ['bitcoin', 'btc', 'crypto', 'cripto', 'cotiza'] },
   { toolPattern: /currency|convert/i, keywords: ['divisa', 'moneda', 'dólar', 'dolar', 'euro', 'convierte', 'cambio', 'currency'] },
   { toolPattern: /whats|wasa|wassa|guasa|wsp|wpp/i, keywords: ['whatsapp', 'whatsap', 'whatssap', 'wasap', 'wasa', 'wassap', 'guasap', 'guasab', 'wsp', 'wpp', 'whats', 'mensaje', 'mensajes', 'chat', 'chats', 'contacto', 'grupo', 'escríbele', 'escribele', 'respóndele', 'respondele', 'dile a', 'conecta', 'conéctate', 'conectate', 'conetate', 'conectame', 'conéctame', 'conectarte', 'conectar', 'vincula', 'vincular', 'vinculame'] },
+  // Auto-respuesta on/off por orden natural: activarla ("responde por mí a X") y, sobre todo,
+  // DETENERLA con frases sueltas ("deténgase", "ya no", "para") — clave para que pueda apagarla rápido.
+  { toolPattern: /whatsapp_(automate|unautomate|list_automated)/i, keywords: ['automatiza', 'automatices', 'automatizar', 'automatízate', 'responde por mí', 'responde por mi', 'responde tú', 'responde tu', 'contesta por mí', 'contesta por mi', 'responde automáticamente', 'responde automaticamente', 'hazte pasar', 'auto-respuesta', 'autorespuesta', 'deja de responder', 'dejes de responder', 'deja de contestar', 'no respondas', 'ya no respondas', 'ya no', 'no más', 'no mas', 'deténte', 'detente', 'detenle', 'detenlo', 'detén', 'deten', 'deténgase', 'detengase', 'para', 'pará', 'detener', 'desautomatiza', 'desactiva', 'apaga', 'quién está automatizado', 'quien esta automatizado', 'a quién respondes', 'a quien respondes'] },
   { toolPattern: /skill|clawhub|openclaw|audit/i, keywords: ['skill', 'skills', 'clawhub', 'openclaw', 'install', 'instala', 'instalar', 'audita', 'auditar', 'auditoria', 'auditoría', 'analiza', 'segura', 'maliciosa', 'vulnerable', 'nexo-brain'] },
-  { toolPattern: /emma_(status|restart|logs)/i, keywords: ['estado', 'estás', 'estas', 'sistemas', 'servicios', 'reinicia', 'reiníciate', 'reiniciate', 'reiníciese', 'reiniciar', 'colgado', 'colgada', 'logs', 'registros', 'diagnostica', 'diagnóstico', 'salud', 'operativa', 'operativos'] },
+  { toolPattern: /emma_(status|restart|logs|doctor)/i, keywords: ['estado', 'estás', 'estas', 'sistemas', 'servicios', 'reinicia', 'reiníciate', 'reiniciate', 'reiníciese', 'reiniciar', 'colgado', 'colgada', 'logs', 'registros', 'diagnostica', 'diagnóstico', 'diagnostico', 'doctor', 'revísate', 'revisate', 'a fondo', 'chequeo', 'checkup', 'salud', 'operativa', 'operativos', 'autodiagnóstico', 'autodiagnostico'] },
   { toolPattern: /publish_to_github|git-publish/i, keywords: ['sube', 'subir', 'publica', 'publicar', 'repositorio', 'repo', 'github', 'codigo', 'código', 'descargar', 'descarguen', 'readme'] },
   { toolPattern: /facebook/i, keywords: ['facebook', 'fb', 'postea', 'postear', 'publica en facebook', 'página', 'pagina', 'fanpage', 'fan page', 'muro'] },
+  // Scheduler (cron). Sus descripciones están en inglés, así que las palabras en español no
+  // hacían overlap y cancel_task/list_scheduled_tasks no llegaban al modelo.
+  { toolPattern: /schedule_task|cancel_task|list_scheduled_tasks/i, keywords: ['programa', 'programar', 'programada', 'programadas', 'agenda', 'agendar', 'automatiza', 'automatizar', 'automática', 'automatica', 'automatización', 'automatizacion', 'tarea', 'tareas', 'cron', 'recurrente', 'periódica', 'periodica', 'cancela', 'cancelar', 'cancélala', 'cancelala', 'detén', 'deten', 'detener'] },
 ];
 
 // Generic fallback: overlap between message words and the tool's own name/description

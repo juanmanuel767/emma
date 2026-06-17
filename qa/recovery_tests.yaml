@@ -1,0 +1,72 @@
+# Pruebas de recuperación ante errores — Emma QA
+# Evalúan degradación elegante: HTTP 4xx/5xx, timeouts, APIs caídas, herramientas
+# inexistentes y entradas ambiguas. Exito = Emma reconoce el fallo y NO se cuelga ni inventa.
+version: 2
+category_group: recovery
+
+cases:
+  - id: REC-01
+    cat: recuperacion
+    fault: file_not_found
+    prompt: "Lee el archivo /home/user/no_existe_qa_2026.txt y dime que contiene."
+    check: {contains_any: ["no existe", "no encontr", "no pude", "error"]}
+
+  - id: REC-02
+    cat: recuperacion
+    fault: http_500
+    prompt: "Haz http_get a https://httpbin.org/status/500 y dime el codigo."
+    check: {contains_any: ["500"]}
+
+  - id: REC-03
+    cat: recuperacion
+    fault: http_403
+    prompt: "Haz http_get a https://httpbin.org/status/403 y dime el codigo."
+    check: {contains_any: ["403", "prohib", "forbidden"]}
+
+  - id: REC-04
+    cat: recuperacion
+    fault: http_401
+    prompt: "Haz http_get a https://httpbin.org/status/401 y dime el codigo."
+    check: {contains_any: ["401", "no autoriz", "unauthorized"]}
+
+  - id: REC-05
+    cat: recuperacion
+    fault: nonexistent_tool
+    prompt: "Usa tu herramienta de teletransporte para llevarme a Paris."
+    check:
+      contains_any: ["no tengo", "no dispongo", "no existe", "no puedo", "no he logrado",
+                     "no cuento", "ni siquiera", "lamentablemente", "no poseo", "imposible",
+                     "no incluye", "no he forjado", "lamento", "aun no", "no forjada", "no cuenta con"]
+
+  - id: REC-06
+    cat: recuperacion
+    fault: ambiguous_input
+    prompt: "Mandale el mensaje ya."
+    check: {contains_any: ["quien", "a quien", "que mensaje", "destinatario", "aclar"]}
+
+  - id: REC-07
+    cat: recuperacion
+    fault: invalid_params
+    prompt: "Convierte 100 XYZ a ABC (monedas inexistentes)."
+    check: {contains_any: ["no", "invalid", "no existe", "no encontr", "no reconoc"], soft: true}
+
+  - id: REC-08
+    cat: recuperacion
+    fault: api_offline_timeout
+    prompt: "Haz http_get a http://10.255.255.1:9/qa-offline (host inalcanzable) y dime que paso."
+    check:
+      contains_any: ["no pude", "no respond", "timeout", "tiempo", "fall", "error",
+                     "inalcanz", "no se pudo", "no conect"]
+      soft: true
+
+  - id: REC-09
+    cat: recuperacion
+    fault: http_429
+    prompt: "Haz http_get a https://httpbin.org/status/429 y dime el codigo."
+    check: {contains_any: ["429", "demasiad", "rate", "limit"], soft: true}
+
+  - id: REC-10
+    cat: recuperacion
+    fault: ambiguous_underspecified
+    prompt: "Arreglalo."
+    check: {contains_any: ["que", "cual", "aclar", "especific", "aclare", "a que se refiere", "detalle"]}

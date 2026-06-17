@@ -16,4 +16,6 @@ export interface IMemoryRepository {
   /** Trae las entradas de una sesión por orden cronológico inverso, sin búsqueda semántica. */
   listBySession(sessionId: string, limit: number): Promise<MemoryEntry[]>;
   deleteBySessionId(sessionId: string): Promise<void>;
+  /** Borra una única entrada por su id. Devuelve true si existía y se eliminó. */
+  deleteById(id: string): Promise<boolean>;
 }

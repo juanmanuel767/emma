@@ -74,6 +74,14 @@ export class MemoryRepository implements IMemoryRepository {
     await this.db.delete(memoryEntries).where(eq(memoryEntries.sessionId, sessionId));
   }
 
+  async deleteById(id: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(memoryEntries)
+      .where(eq(memoryEntries.id, id))
+      .returning({ id: memoryEntries.id });
+    return rows.length > 0;
+  }
+
   #toEntity(row: typeof memoryEntries.$inferSelect): MemoryEntry {
     return {
       id: row.id,

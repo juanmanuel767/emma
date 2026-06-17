@@ -13,6 +13,8 @@ import {
 } from '@emma/skills';
 import { CommandTool, FileTool, PlaywrightTool, WebSearchTool, SshTool, EmailTool } from '@emma/tools';
 import type { ISkill } from '@emma/skills';
+import type { IMemoryRepository } from '@emma/core/ports';
+import { createMemorySkill } from './MemorySkill.js';
 
 const legacyToolsSkill: ISkill = {
   name: 'core-tools',
@@ -21,7 +23,10 @@ const legacyToolsSkill: ISkill = {
   tools: [new CommandTool(), new FileTool(), new PlaywrightTool(), new WebSearchTool(), new SshTool(), new EmailTool()],
 };
 
-export async function buildSkillRegistry(mcpConfigPath?: string): Promise<{ registry: SkillRegistry; mcp: McpManager }> {
+export async function buildSkillRegistry(
+  mcpConfigPath?: string,
+  memoryRepo?: IMemoryRepository,
+): Promise<{ registry: SkillRegistry; mcp: McpManager }> {
   const registry = new SkillRegistry();
   const dataDir = join(homedir(), '.emma');
 
@@ -34,6 +39,9 @@ export async function buildSkillRegistry(mcpConfigPath?: string): Promise<{ regi
     .registerSkill(NotesSkill)
     .registerSkill(SystemSkill)
     .registerSkill(RemindersSkill);
+
+  // Memoria de perfil: olvidar/listar hechos del señor (requiere el repositorio).
+  if (memoryRepo) registry.registerSkill(createMemorySkill(memoryRepo));
 
   // External skills from ~/.emma/skills/ (sets the hot-reload dir)
   await registry.loadExternalSkills(join(dataDir, 'skills'));

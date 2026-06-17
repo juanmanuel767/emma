@@ -19,6 +19,7 @@ import { RedisSessionStore } from './infrastructure/session/RedisSessionStore.js
 import { RunConversation } from './application/use-cases/RunConversation.js';
 import { buildServer } from './interface/http/server.js';
 import { buildSkillRegistry } from './infrastructure/tools/buildSkillRegistry.js';
+import { installRuntimeSecretGuard } from './infrastructure/security/runtimeGuard.js';
 
 const logger = createLogger('agent');
 
@@ -43,8 +44,16 @@ const envSchema = z.object({
   OPENROUTER_API_KEY: z.string().transform((v) => v || undefined).optional(),
   // OpenCode Zen — pasarela de opencode con modelos free (https://opencode.ai/auth)
   OPENCODE_API_KEY: z.string().transform((v) => v || undefined).optional(),
-  // big-pickle es un alias rotatorio (a veces enruta a backends sin tools) — usar deepseek estable
+  // Primario INTERACTIVO: nemotron responde al instante (sin fase de razonamiento que congela
+  // el chat web). deepseek-v4-flash y north-mini razonan en silencio antes de responder → van al
+  // final como respaldo. big-pickle se omite (alias rotatorio que a veces va a backends sin tools).
   OPENCODE_MODEL: z.string().default('deepseek-v4-flash-free'),
+  // Modelos gratis de OpenCode Zen como cadena de fallback (separados por coma). Todos con tools.
+  // Orden: RÁPIDOS primero (deepseek-flash ~2s, mimo, north-mini); nemotron-ultra 550B al final
+  // (más capaz pero ~5.5s/saludo y ~37s con herramientas → solo como último recurso).
+  OPENCODE_MODELS: z.string().default(
+    'deepseek-v4-flash-free,mimo-v2.5-free,north-mini-code-free,nemotron-3-ultra-free',
+  ),
   // Cadena de modelos gratis (separados por coma) que se registran como fallback.
   // Por defecto: solo modelos con ~1M tokens de contexto.
   OPENROUTER_MODELS: z.string().default(
@@ -72,13 +81,23 @@ function buildProviderManager(env: z.infer<typeof envSchema>): LLMProviderManage
     });
   }
 
-  // OpenCode Zen: endpoint OpenAI-compatible en /zen/v1/ con modelos free
+  // OpenCode Zen: endpoint OpenAI-compatible en /zen/v1/ con modelos free.
+  // El primario conserva el nombre 'opencode' (ModelService lo usa al seleccionar desde el catálogo);
+  // los demás modelos gratis se añaden como eslabones de fallback 'opencode:<modelo>'.
   if (env.OPENCODE_API_KEY) {
     providers.push({
       name: 'opencode',
       adapter: new OpenAICompatibleAdapter(env.OPENCODE_API_KEY, env.OPENCODE_MODEL, 'https://opencode.ai', 'opencode', '/zen/v1/'),
       model: env.OPENCODE_MODEL,
     });
+    for (const model of env.OPENCODE_MODELS.split(',').map((m) => m.trim()).filter(Boolean)) {
+      if (model === env.OPENCODE_MODEL) continue; // el primario ya está
+      providers.push({
+        name: `opencode:${model}`,
+        adapter: new OpenAICompatibleAdapter(env.OPENCODE_API_KEY, model, 'https://opencode.ai', 'opencode', '/zen/v1/'),
+        model,
+      });
+    }
   }
 
   // OpenRouter: cada modelo gratis es un proveedor independiente en la cadena de fallback
@@ -114,6 +133,9 @@ function buildProviderManager(env: z.infer<typeof envSchema>): LLMProviderManage
 
 async function main() {
   const env = loadConfig(envSchema);
+  // Tras cargar el .env propio, blindar el runtime: ninguna herramienta (ni forjada) podrá
+  // ya leer archivos secreto ni volcar el entorno, pase como pase construida la ruta/comando.
+  installRuntimeSecretGuard();
   const llm = buildProviderManager(env);
 
   const db = createDb(env.DATABASE_URL);
@@ -127,7 +149,7 @@ async function main() {
     ? new VoyageEmbeddingAdapter(env.VOYAGE_API_KEY)
     : new NullEmbeddingAdapter();
 
-  const { registry: toolRegistry, mcp } = await buildSkillRegistry();
+  const { registry: toolRegistry, mcp } = await buildSkillRegistry(undefined, memoryRepo);
 
   const runConversation = new RunConversation(
     llm,

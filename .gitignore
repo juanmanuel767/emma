@@ -12,3 +12,10 @@ coverage/
 *.pem
 *.key
 *-token.backup
+
+# Artefactos generados / no versionar
+graphify-out/
+**/__pycache__/
+qa/reports/
+qa/evidence/
+qa/baselines/*.json

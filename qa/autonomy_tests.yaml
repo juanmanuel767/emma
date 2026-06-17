@@ -1,0 +1,41 @@
+# Pruebas de autonomía — Emma QA
+# Tareas multi-paso que exigen planificar, encadenar herramientas y/o cerrar el flujo
+# sin supervisión. Se evalúa: usa >=1 herramienta cuando procede (min_tools), produce
+# resultado verificable (contains/regex) y NO se queda vacío.
+version: 2
+category_group: autonomy
+
+cases:
+  - id: AUTO-01
+    cat: autonomia
+    skill: chain_tools
+    min_tools: 1
+    prompt: "Genera una contrasena segura de 20 caracteres y dime cuantos caracteres tiene exactamente."
+    check: {tool: generate_secure_password, contains_any: ["20", "veinte"]}
+
+  - id: AUTO-02
+    cat: autonomia
+    skill: multi_step_reasoning
+    prompt: "Tengo 3 reuniones de 45 minutos con 15 minutos de descanso entre cada una. Cuanto tiempo total ocupan? Muestra el calculo."
+    check: {contains_any: ["165", "2 h 45", "2h45", "2 horas 45"]}
+
+  - id: AUTO-03
+    cat: autonomia
+    skill: plan_decomposition
+    prompt: "Quiero lanzar un blog personal. Descomponlo en fases ordenadas con al menos 4 pasos concretos."
+    check:
+      contains_any: ["dominio", "hosting", "diseñ", "contenido", "publicar", "fase", "paso"]
+      regex: '(\d[\).]|paso|fase)'
+
+  - id: AUTO-04
+    cat: autonomia
+    skill: tool_then_interpret
+    min_tools: 1
+    prompt: "Revisa el certificado SSL de google.com y dime en una frase si es de confianza y cuando vence."
+    check: {tool: check_ssl_cert, contains_any: ["2026", "valido", "confianza", "vence", "expir"]}
+
+  - id: AUTO-05
+    cat: autonomia
+    skill: persist_until_done
+    prompt: "Convierte 50 euros a dolares y luego dime cuanto seria el 10% de ese resultado."
+    check: {contains_any: ["$", "dolar", "usd", "10%"], soft: true}

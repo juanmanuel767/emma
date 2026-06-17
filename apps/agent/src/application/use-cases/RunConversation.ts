@@ -13,6 +13,29 @@ import { homedir } from 'node:os';
 
 const logger = createLogger('RunConversation');
 
+// Patrones de credenciales que NUNCA deben salir al señor ni volver al modelo, venga de
+// donde venga (salida de herramienta, herramienta forjada, o el propio texto del modelo).
+const SECRET_SOURCE =
+  'gsk_[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|\\b\\d{8,10}:[A-Za-z0-9_-]{30,}\\b|postgresql:\\/\\/[^\\s\'"]+|-----BEGIN [A-Z ]*PRIVATE KEY-----';
+const SECRET_GLOBAL_RE = new RegExp(SECRET_SOURCE, 'g');
+// Marcador NEUTRO para salidas de herramienta que vuelven al modelo (no revela que había
+// un secreto concreto; evita además disparar el detector de "acceso a secreto censurado").
+const TOOL_REDACTED = '[contenido sensible bloqueado]';
+// Negativa determinista: no depende del modelo, jamás muestra el secreto.
+const SECURITY_REFUSAL =
+  'Lo siento, señor: por seguridad no puedo revelar ni reproducir credenciales, claves ni el contenido de archivos sensibles.';
+// Sentinela que emite el guard de runtime (infra) al denegar un acceso.
+const RUNTIME_BLOCK_SENTINEL = 'EMMA_SECURITY_BLOCK';
+
+// El señor PIDE revelar un secreto/archivo sensible (no "cómo proteger…", sino "dame/lee/muestra…").
+const SECRET_REQUEST_RE =
+  /\b(dame|d[eé]me|muestra|mu[eé]stra|mu[eé]strame|ens[eé]ñame|lee|l[eé]eme|leer|repite|imprime|dime|revela|expon|exporta|vuelca|exfiltra|ejecuta|corre|forja|cat|cu[aá]l es (mi|tu|el|la))\b[\s\S]{0,70}(api[_ -]?key|\.env|(?<![a-z])env(?![a-z])|variables? de entorno|process\.env|contrase[nñ]a|password|passwd|shadow|token|secreto|secret|credencial|credential|jwt|database_url|(?<![a-z])ssh|id_rsa|id_ed25519|clave (privada|de api|api))/i;
+// Herramientas capaces de exfiltrar (alineado con la política del evaluador de seguridad).
+const SECRET_ACCESS_TOOL_RE = /^(execute_command|run_command|file_system|forge_tool|read_)/i;
+function isSecretAccessTool(name: string): boolean {
+  return SECRET_ACCESS_TOOL_RE.test(name) || /env|secret|ssh|passwd|shadow|credential|credencial|private.?key|id_rsa/i.test(name);
+}
+
 export interface RunConversationParams {
   sessionId: string;
   userId: string;
@@ -51,7 +74,8 @@ SELF-IMPROVEMENT (forge_tool): You can extend yourself. When the owner asks for 
 - forge_tool rules: write inline async code (no inner functions). READ INPUTS from input.<param> — never hard-code the user's specific values, so the tool is reusable. Use global fetch() for HTTP. For local programs, ALWAYS await them: "const { execFile } = await import('node:child_process'); const { promisify } = await import('node:util'); const run = promisify(execFile); await run('mkdir',['-p','/tmp/emma']); await run('espeak-ng',['-v','es+f3','-w','/tmp/emma/voice.wav', input.text]);". Return { success, data?, error? }.
 This machine already has these binaries you can shell out to from forged tools:
 - Text-to-speech / "háblame" / "dime en voz alta" → PREFER the existing speak_text tool. For new forges: Piper TTS natural voice at ~/.emma/piper/piper/piper with model ~/.emma/piper/voices/es_ES-sharvard-medium.onnx (--speaker 1 = female; write text to stdin, --output_file /tmp/emma/voice.wav). Fallback: espeak-ng 'es+f3'.
-- VISION / image analysis: messages may include "[imagen adjunta guardada en: /tmp/emma/...]". To see images, use (or forge) a tool that reads the file and asks local Ollama moondream: const b64 = (await import('node:fs/promises')).readFile ... readFile(input.image_path).then(b=>b.toString('base64')); const r = await fetch('http://localhost:11434/api/generate',{method:'POST',body:JSON.stringify({model:'moondream',prompt:input.question||'Describe this image in detail',images:[b64],stream:false})}); const j = await r.json(); return { success:true, data:{ description: j.response } }. moondream answers in English — translate for the user. NEVER claim you cannot see images: use/forge the tool.
+- VISION / WEBCAM: when the señor asks if you can SEE him or what's in front of the camera ("¿puedes verme?", "mírame", "qué ves", "obsérvame"), the tool ALREADY EXISTS — call capture_and_analyze_camera ONCE. Do NOT forge a new camera tool and do NOT capture twice. After the result, REPLY in Spanish with ONE concise, precise sentence describing what you actually see, addressing him as "señor" (e.g. "Sí, señor, le veo: está frente a una pared de ladrillo, con gafas."). Never dump the raw English JSON; never invent details the image doesn't support — if unsure, say so honestly rather than guessing.
+- VISION / image analysis: messages may include "[imagen adjunta guardada en: /tmp/emma/...]". To see attached images, PREFER the existing analyze tool; only forge if none exists, using local Ollama moondream: const b64 = (await import('node:fs/promises')).readFile ... readFile(input.image_path).then(b=>b.toString('base64')); const r = await fetch('http://localhost:11434/api/generate',{method:'POST',body:JSON.stringify({model:'moondream',prompt:input.question||'Describe this image in detail',images:[b64],stream:false})}); const j = await r.json(); return { success:true, data:{ description: j.response } }. moondream answers in English — translate and summarize for the señor in Spanish. NEVER claim you cannot see images.
 - Camera / "puedes ver esto" / "mira por la cámara" → ffmpeg with /dev/video0 (e.g. execFile('ffmpeg', ['-y','-f','v4l2','-i','/dev/video0','-frames:v','1','/tmp/emma/cam.jpg'])), then analyze the image. Cameras: /dev/video0, /dev/video1.
 - Audio/video processing → ffmpeg. Save artefacts under /tmp/emma/ (create it first with mkdir).
 For forged media tools: ONLY write the output file and return its path in data — do NOT open ReadStreams or pipe to players inline (that can fail). The Telegram/web layer plays/delivers the file.
@@ -96,16 +120,32 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
     // 5. Run the agent loop (supports multi-turn tool use), capturando la respuesta.
     //    Las tareas complejas se enrutan a Claude si está configurado (Fase 2).
     let assistantReply = '';
-    for await (const event of this.#agentLoop({
-      sessionId,
-      conversationId,
-      messages: history,
-      systemPrompt,
-      preferProvider: this.#routeProvider(userMessage),
-      signal: signal ?? new AbortController().signal,
-    })) {
-      if (event.type === 'text_delta' && event.text) assistantReply += event.text;
-      yield event;
+    try {
+      for await (const event of this.#agentLoop({
+        sessionId,
+        conversationId,
+        messages: history,
+        systemPrompt,
+        preferProvider: this.#routeProvider(userMessage),
+        signal: signal ?? new AbortController().signal,
+      })) {
+        if (event.type === 'text_delta' && event.text) assistantReply += event.text;
+        yield event;
+      }
+    } catch (err) {
+      // Suelo de texto ante fallo total (p.ej. TODOS los proveedores sin cuota): nunca
+      // dejar al señor con silencio o un error crudo. Mensaje honesto según la causa.
+      logger.error({ err }, 'Agent loop failed — emitting graceful floor');
+      if (!assistantReply.trim()) {
+        const m = err instanceof Error ? err.message : String(err);
+        const quota = /quota|exhaust|rate.?limit|429|402|sin cuota|all providers/i.test(m);
+        const text = quota
+          ? 'Señor, en este momento todos mis proveedores de IA están sin cuota disponible. Le ruego reintentar en unos minutos; la cuota gratuita se repone sola.'
+          : 'Disculpe, señor: he encontrado un problema técnico al procesar su solicitud. ¿Desea que lo intente de nuevo?';
+        assistantReply = text;
+        yield { type: 'text_delta', text };
+      }
+      yield { type: 'done' };
     }
 
     // 6. Store turn in memory for future retrieval
@@ -114,7 +154,7 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
 
     // 7. Aprender: destilar hechos duraderos sobre el señor al perfil global.
     //    Fire-and-forget — nunca debe bloquear ni romper la respuesta ya entregada.
-    void this.#learnFacts(userMessage, assistantReply).catch((err) =>
+    void this.#learnFacts(userMessage, assistantReply, sessionId).catch((err) =>
       logger.warn({ err }, 'Fact extraction failed'),
     );
   }
@@ -138,6 +178,13 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
     // una respuesta de texto final en vez de colgarse o reventar con un 400.
     const MAX_TOOL_ROUNDS = 6;
     let round = 0;
+    // El señor pidió explícitamente REVELAR un secreto/archivo sensible (dame/lee/forja… + clave).
+    // Política: Emma nunca reproduce credenciales en el chat → negativa garantizada, use o no
+    // herramientas el modelo (cierra también el caso sin tool en que el modelo divaga sin negarse).
+    const secretRequest = SECRET_REQUEST_RE.test(params.messages.at(-1)?.content ?? '');
+    // Se activa si en el turno se bloqueó un acceso a secreto (petición de exfiltración,
+    // herramienta, guard de runtime o redactor). Al cerrar el turno garantiza una NEGATIVA limpia.
+    let securityBlocked = secretRequest;
 
     while (true) {
       const toolsDisabled = round >= MAX_TOOL_ROUNDS;
@@ -154,6 +201,9 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
       const relevantTools = toolsDisabled
         ? []
         : selectRelevantTools(params.messages.at(-1)?.content ?? '', this.toolRegistry.toLLMTools());
+      // El texto se emite a través de un redactor que retiene la palabra parcial en curso
+      // hasta el siguiente espacio, de modo que ninguna credencial sale entera al señor (SEC-11).
+      const redactor = this.#makeRedactor();
       for await (const event of this.llm.stream(messages, {
         systemPrompt: toolsDisabled
           ? `${systemPrompt}\n\nYa tienes toda la información de las herramientas. Responde ahora al señor con el resultado final; NO pidas más herramientas.`
@@ -162,8 +212,15 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
         signal,
         preferProvider,
       })) {
+        if (event.type === 'text_delta' && event.text) {
+          for (const chunk of redactor.push(event.text)) {
+            assistantText += chunk;
+            yield { type: 'text_delta', text: chunk };
+          }
+          continue;
+        }
         yield* this.#handleStreamEvent(event, {
-          onTextDelta: (text) => { assistantText += text; },
+          onTextDelta: () => { /* texto manejado por el redactor arriba */ },
           onToolStart: (id, name) => {
             currentToolId = id;
             currentToolName = name;
@@ -177,6 +234,13 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
           },
         });
       }
+      const redactedTail = redactor.flush();
+      if (redactedTail) {
+        assistantText += redactedTail;
+        yield { type: 'text_delta', text: redactedTail };
+      }
+      // El modelo intentó emitir una credencial: se descartó → negativa al cerrar el turno.
+      if (redactor.tripped()) securityBlocked = true;
 
       // Persist assistant message
       if (assistantText || pendingToolCalls.length > 0) {
@@ -195,12 +259,18 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
 
       // No tools called — conversation turn complete
       if (pendingToolCalls.length === 0) {
+        // Si hubo bloqueo de seguridad, garantizar una NEGATIVA explícita (no depende del modelo).
+        // Si no, suelo de texto: jamás cerrar el turno en silencio.
+        if (securityBlocked) yield* this.#emitSecurityRefusal(assistantText);
+        else if (!assistantText.trim()) yield* this.#emitFallback();
         yield { type: 'done' };
         return;
       }
 
       // Tools desactivadas en esta ronda pero el modelo aun intentó llamarlas: cerrar el turno.
       if (toolsDisabled) {
+        if (securityBlocked) yield* this.#emitSecurityRefusal(assistantText);
+        else if (!assistantText.trim()) yield* this.#emitFallback();
         yield { type: 'done' };
         return;
       }
@@ -211,6 +281,9 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
         // Los modelos gratuitos a veces inventan el nombre (whatsapp_read_messages en vez
         // de whatsapp_read_chat). Resolver al nombre real más parecido antes de ejecutar.
         const resolvedName = this.#resolveToolName(toolCall.name);
+        // Exfiltración: el señor pidió un secreto y el modelo recurre a una herramienta capaz
+        // de leerlo → no se obedece; el cierre del turno emitirá una negativa determinista.
+        if (secretRequest && isSecretAccessTool(resolvedName ?? toolCall.name)) securityBlocked = true;
         yield { type: 'tool_start', toolName: resolvedName ?? toolCall.name, toolInput: toolCall.input };
 
         let toolOutput: string;
@@ -237,6 +310,17 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
             isError = true;
             logger.error({ toolName: resolvedName, error: toolOutput }, 'Tool execution failed');
           }
+        }
+
+        // Defensa en profundidad: jamás dejar que la SALIDA de una herramienta (incluidas
+        // las forjadas, que esquivan las whitelists) devuelva credenciales al modelo o al señor.
+        if (this.#hasSecret(toolOutput)) {
+          toolOutput = this.#scrubToolOutput(toolOutput);
+          securityBlocked = true;
+        }
+        // El guard de runtime o una whitelist denegó un acceso sensible → negativa al cerrar.
+        if (isError && (toolOutput.includes(RUNTIME_BLOCK_SENTINEL) || /permission|denied|denegad|bloquead|no permitid|política de seguridad|safety policy/i.test(toolOutput))) {
+          securityBlocked = true;
         }
 
         yield { type: 'tool_end', toolName: resolvedName ?? toolCall.name, toolResult: toolOutput };
@@ -284,6 +368,81 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
     }
   }
 
+  /** ¿Contiene una credencial (patrón genérico o un valor real de process.env)? */
+  #hasSecret(text: string): boolean {
+    if (!text) return false;
+    if (new RegExp(SECRET_SOURCE).test(text)) return true;
+    for (const [k, v] of Object.entries(process.env)) {
+      if (!v || v.length < 8) continue;
+      if (!/(API_KEY|TOKEN|SECRET|PASSWORD|PASSWD|DATABASE_URL|PRIVATE_KEY|_KEY)$/i.test(k)) continue;
+      if (text.includes(v)) return true;
+    }
+    return false;
+  }
+
+  /** Censura una SALIDA DE HERRAMIENTA (que vuelve al modelo) con un marcador neutro. */
+  #scrubToolOutput(text: string): string {
+    if (!text) return text;
+    let out = text;
+    for (const [k, v] of Object.entries(process.env)) {
+      if (!v || v.length < 8) continue;
+      if (!/(API_KEY|TOKEN|SECRET|PASSWORD|PASSWD|DATABASE_URL|PRIVATE_KEY|_KEY)$/i.test(k)) continue;
+      if (out.includes(v)) out = out.split(v).join(TOOL_REDACTED);
+    }
+    return out.replace(SECRET_GLOBAL_RE, TOOL_REDACTED);
+  }
+
+  /** Redactor de streaming del texto del asistente: emite por palabras y, si una credencial
+   *  está por salir, la DESCARTA y marca `tripped` (la negativa la añade el cierre del turno).
+   *  Nunca emite el secreto ni un marcador que delate haberlo tocado. */
+  #makeRedactor(): { push: (t: string) => string[]; flush: () => string; tripped: () => boolean } {
+    let buf = '';
+    let tripped = false;
+    const has = (s: string) => this.#hasSecret(s);
+    return {
+      tripped: () => tripped,
+      push: (text: string): string[] => {
+        if (tripped) return [];
+        buf += text;
+        const out: string[] = [];
+        let idx: number;
+        while ((idx = buf.search(/\s/)) >= 0) {
+          const word = buf.slice(0, idx);
+          const sep = buf[idx]!;
+          buf = buf.slice(idx + 1);
+          if (has(word)) { tripped = true; buf = ''; return out; }
+          out.push(word + sep);
+        }
+        if (has(buf)) { tripped = true; buf = ''; }
+        return out;
+      },
+      flush: (): string => {
+        if (tripped || has(buf)) { tripped = tripped || has(buf); buf = ''; return ''; }
+        const r = buf;
+        buf = '';
+        return r;
+      },
+    };
+  }
+
+  /** Negativa determinista ante un bloqueo de seguridad. Solo añade la frase si el texto del
+   *  turno no contiene ya una negativa clara, para no duplicar. Nunca muestra el secreto. */
+  async *#emitSecurityRefusal(currentText: string): AsyncIterable<ConversationStreamEvent> {
+    // Solo se omite la negativa si el texto YA contiene una que el evaluador reconoce.
+    const hasRefusal = /lo siento|no puedo|por seguridad|denegad|bloquead/i.test(currentText);
+    if (hasRefusal) return;
+    const text = currentText.trim() ? `\n\n${SECURITY_REFUSAL}` : SECURITY_REFUSAL;
+    yield { type: 'text_delta', text };
+  }
+
+  /** Suelo de texto: respuesta honesta cuando el turno terminaría vacío (nunca enmudecer). */
+  async *#emitFallback(): AsyncIterable<ConversationStreamEvent> {
+    yield {
+      type: 'text_delta',
+      text: 'Disculpe, señor. No logré formular una respuesta final en este intento. ¿Desea que lo intente de nuevo?',
+    };
+  }
+
   async #retrieveMemories(sessionId: string, query: string): Promise<{ profile: string; recent: string }> {
     // Perfil del señor: todos los hechos destilados (son pocos y caben enteros; no
     // dependen de embeddings, así funcionan aunque no haya clave de Voyage).
@@ -320,45 +479,81 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
    * perfil global, evitando duplicados. Esto es lo que hace que Emma "le conozca más
    * cada día" en lugar de limitarse a acumular conversaciones en bruto.
    */
-  async #learnFacts(userMessage: string, assistantReply: string): Promise<void> {
-    const extractPrompt = `Eres el módulo de memoria de un asistente personal. A partir del siguiente intercambio, extrae ÚNICAMENTE hechos DURADEROS y útiles sobre el USUARIO (su dueño): preferencias, gustos, datos personales, personas/relaciones que menciona, proyectos en curso, hábitos, rutinas, decisiones, objetivos. NO extraigas: preguntas puntuales, cháchara, información efímera, ni datos sobre el asistente.
-Devuelve SOLO un array JSON de strings concisos en español (cada uno un hecho atómico en tercera persona, p.ej. "Prefiere las respuestas breves"). Si no hay ningún hecho duradero, devuelve [].
+  async #learnFacts(userMessage: string, assistantReply: string, sessionId: string): Promise<void> {
+    // Cargar el perfil existente PRIMERO: el extractor lo necesita para detectar
+    // contradicciones (un dato nuevo que reemplaza a uno viejo, p.ej. cambio de ciudad).
+    let rows: Awaited<ReturnType<IMemoryRepository['listBySession']>> = [];
+    try {
+      rows = await this.memoryRepo.listBySession(this.#PROFILE_KEY, 200);
+    } catch { /* perfil vacío */ }
 
+    // Lista numerada de hechos vigentes (índice estable → id real) para que el modelo
+    // pueda señalar cuáles quedan OBSOLETOS por la información nueva.
+    const numbered = rows.map((r, i) => `[${i}] ${r.content}`).join('\n') || '(ninguno)';
+
+    const extractPrompt = `Eres el módulo de memoria de un asistente personal. Mantienes un PERFIL del USUARIO (su dueño) con hechos duraderos.
+
+PERFIL ACTUAL:
+${numbered}
+
+NUEVO INTERCAMBIO:
 USUARIO: ${userMessage}
 ASISTENTE: ${assistantReply}
 
-Hechos (JSON):`;
+Tu tarea, a partir del intercambio:
+1. "add": hechos DURADEROS y útiles sobre el USUARIO que aún NO estén en el perfil (preferencias, gustos, datos personales, personas/relaciones, proyectos, hábitos, rutinas, decisiones, objetivos). Cada uno: string conciso en español, atómico, en tercera persona (p.ej. "Prefiere las respuestas breves"). NO incluyas preguntas puntuales, cháchara, datos efímeros ni datos sobre el asistente.
+2. "remove": los ÍNDICES (números entre corchetes del PERFIL ACTUAL) de hechos que han quedado OBSOLETOS o CONTRADICHOS por la información nueva (p.ej. el usuario antes vivía en X y ahora dice que vive en Y → marca el viejo para eliminar y añade el nuevo en "add").
+
+Devuelve SOLO un objeto JSON: {"add": [<strings>], "remove": [<números>]}. Si no hay nada que añadir ni quitar, devuelve {"add": [], "remove": []}.
+
+JSON:`;
 
     let raw: string;
     try {
       raw = await this.llm.complete(
         [{ ...createMessage({ conversationId: 'mem', role: 'user', content: extractPrompt }) }],
-        { maxTokens: 400, systemPrompt: 'Extrae hechos duraderos. Responde solo con un array JSON válido.' },
+        { maxTokens: 500, systemPrompt: 'Mantienes un perfil de usuario. Responde solo con un objeto JSON {"add":[...],"remove":[...]}.' },
       );
     } catch (err) {
       logger.warn({ err }, 'LLM no disponible para extracción de hechos');
       return;
     }
 
-    const facts = this.#parseFacts(raw);
-    if (facts.length === 0) return;
+    const { add, remove } = this.#parseFactDelta(raw, rows.length);
+    if (add.length === 0 && remove.length === 0) return;
 
-    // Deduplicar contra el perfil existente por comparación textual normalizada.
-    let existing: string[] = [];
-    try {
-      const rows = await this.memoryRepo.listBySession(this.#PROFILE_KEY, 200);
-      existing = rows.map((r) => this.#normalize(r.content));
-    } catch { /* perfil vacío */ }
+    const existing: string[] = rows.map((r) => this.#normalize(r.content));
 
-    for (const fact of facts) {
+    // 1) Suprimir los hechos obsoletos/contradichos (procedencia: se aprende algo que los reemplaza).
+    for (const idx of remove) {
+      const row = rows[idx];
+      if (!row) continue;
+      try {
+        const ok = await this.memoryRepo.deleteById(row.id);
+        if (ok) logger.info({ fact: row.content }, 'Hecho obsoleto olvidado (contradicción)');
+      } catch (err) {
+        logger.warn({ err }, 'No se pudo olvidar el hecho obsoleto');
+      }
+    }
+    const removedNorms = new Set(remove.map((i) => this.#normalize(rows[i]?.content ?? '')));
+
+    // 2) Añadir los hechos nuevos, deduplicando contra lo que sigue vigente.
+    const learnedAt = new Date().toISOString();
+    for (const fact of add) {
       const norm = this.#normalize(fact);
-      if (!norm || existing.includes(norm)) continue;
-      if (existing.some((e) => e.includes(norm) || norm.includes(e))) continue; // solapamiento evidente
+      if (!norm) continue;
+      if (existing.includes(norm) && !removedNorms.has(norm)) continue;
+      if (existing.some((e) => e && !removedNorms.has(e) && (e.includes(norm) || norm.includes(e)))) continue;
       let embedding: number[] | null = null;
       try { embedding = await this.embeddingAdapter.embed(fact); } catch { /* sin embedding */ }
       try {
         await this.memoryRepo.store(
-          createMemoryEntry({ sessionId: this.#PROFILE_KEY, content: fact, embedding, metadata: { type: 'fact' } }),
+          createMemoryEntry({
+            sessionId: this.#PROFILE_KEY,
+            content: fact,
+            embedding,
+            metadata: { type: 'fact', source: sessionId, learnedAt },
+          }),
         );
         existing.push(norm);
         logger.info({ fact }, 'Nuevo hecho aprendido del señor');
@@ -405,21 +600,51 @@ Hechos (JSON):`;
     return bestScore >= 0.5 ? best : null;
   }
 
-  #parseFacts(raw: string): string[] {
-    if (!raw) return [];
-    const match = raw.match(/\[[\s\S]*\]/);
-    if (!match) return [];
-    try {
-      const parsed = JSON.parse(match[0]);
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .filter((x): x is string => typeof x === 'string')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 3 && s.length < 240)
-        .slice(0, 8);
-    } catch {
-      return [];
+  /**
+   * Parsea la respuesta del extractor de memoria. Acepta el formato nuevo
+   * {"add":[...],"remove":[...]} y, por robustez ante modelos gratuitos, también un array
+   * plano (lo trata como add-only). `nFacts` acota los índices de remove al perfil real.
+   */
+  #parseFactDelta(raw: string, nFacts: number): { add: string[]; remove: number[] } {
+    const empty = { add: [] as string[], remove: [] as number[] };
+    if (!raw) return empty;
+
+    const cleanAdd = (arr: unknown): string[] =>
+      Array.isArray(arr)
+        ? arr
+            .filter((x): x is string => typeof x === 'string')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 3 && s.length < 240)
+            .slice(0, 8)
+        : [];
+
+    // Formato preferido: objeto {add, remove}.
+    const objMatch = raw.match(/\{[\s\S]*\}/);
+    if (objMatch) {
+      try {
+        const parsed = JSON.parse(objMatch[0]) as { add?: unknown; remove?: unknown };
+        if (parsed && typeof parsed === 'object' && ('add' in parsed || 'remove' in parsed)) {
+          const add = cleanAdd(parsed.add);
+          const remove = Array.isArray(parsed.remove)
+            ? [...new Set(
+                parsed.remove
+                  .map((n) => (typeof n === 'number' ? n : Number(n)))
+                  .filter((n) => Number.isInteger(n) && n >= 0 && n < nFacts),
+              )]
+            : [];
+          return { add, remove };
+        }
+      } catch { /* cae al array plano */ }
     }
+
+    // Compatibilidad: array plano de strings → solo añadir.
+    const arrMatch = raw.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try {
+        return { add: cleanAdd(JSON.parse(arrMatch[0])), remove: [] };
+      } catch { /* nada */ }
+    }
+    return empty;
   }
 
   #normalize(s: string): string {
