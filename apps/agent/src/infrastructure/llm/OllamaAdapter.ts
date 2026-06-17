@@ -50,6 +50,7 @@ export class OllamaAdapter implements ILLMAdapter {
         messages: ollamaMessages,
         tools: tools?.length ? tools : undefined,
         stream: true,
+        keep_alive: '30m', // mantener el modelo en RAM: piso local instantáneo entre turnos
         options: { temperature: 0.7, num_ctx: 8192 },
       }),
       signal: options.signal,
@@ -120,6 +121,7 @@ export class OllamaAdapter implements ILLMAdapter {
         model: this.model,
         messages: ollamaMessages,
         stream: false,
+        keep_alive: '30m',
       }),
     });
 

@@ -235,6 +235,7 @@ async function processMessage(
   let responseText = '';
   let lastUpdate = Date.now();
   let screenshotUsed = false;
+  let localFloorNotified = false; // para avisar UNA sola vez si caemos al modo local lento
   const mediaFiles = new Set<string>();
   const UPDATE_INTERVAL_MS = 1_500;
 
@@ -268,12 +269,12 @@ async function processMessage(
           mediaFiles.add(m[0]);
         }
       } else if (event.type === 'provider_switched') {
-        const from = providerDisplay(event.fromProvider);
-        const to   = providerDisplay(event.toProvider);
-        const slowNote = event.toProvider === 'ollama'
-          ? '\n\n🐢 _Modo local: la respuesta puede tardar 1–2 minutos, señor. Las cuotas cloud se renuevan a las 19:00._'
-          : '';
-        await ctx.reply(`⚠️ Tokens agotados en *${from}*, señor.\nCambiando automáticamente a *${to}*.${slowNote}`, { parse_mode: 'Markdown' });
+        // Silencio en los saltos entre proveedores de NUBE: la cascada de failover es interna y
+        // no debe inundar al señor. Solo se avisa (una vez) si caemos al modo LOCAL, que es lento.
+        if (event.toProvider === 'ollama' && !localFloorNotified) {
+          localFloorNotified = true;
+          await ctx.reply('🐢 _Operando en modo local, señor: las cuotas en la nube están agotadas y mi respuesta puede tardar un poco. Se renuevan solas._', { parse_mode: 'Markdown' });
+        }
       }
     }
 

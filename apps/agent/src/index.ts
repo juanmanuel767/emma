@@ -36,7 +36,7 @@ const envSchema = z.object({
   LLM_PROVIDER: z.enum(['anthropic', 'ollama', 'groq', 'openai']).optional(),
   ANTHROPIC_API_KEY: z.string().transform((v) => v || undefined).optional(),
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
-  OLLAMA_MODEL: z.string().default('llama3.2:latest'),
+  OLLAMA_MODEL: z.string().default('llama3.2:1b'),
   GROQ_API_KEY: z.string().transform((v) => v || undefined).optional(),
   GROQ_MODEL: z.string().default('qwen/qwen3-32b'),
   OPENAI_API_KEY: z.string().transform((v) => v || undefined).optional(),
