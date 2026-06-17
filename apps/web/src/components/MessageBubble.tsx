@@ -31,6 +31,15 @@ export function MessageBubble({ message }: Props) {
         {media.length > 0 && <MediaPreview paths={media} />}
       </div>
 
+      {!isUser && message.localMode && (
+        <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80 px-1">
+          <span>🐢</span>
+          <span>
+            Modo local{message.streaming ? ' — generando, puede tardar un poco' : ' (cuotas en la nube agotadas)'}
+          </span>
+        </div>
+      )}
+
       {message.toolCalls && message.toolCalls.length > 0 && (
         <div className="flex flex-col gap-1 w-full max-w-[80%]">
           {message.toolCalls.map((tc, i) => (

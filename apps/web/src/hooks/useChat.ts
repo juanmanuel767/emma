@@ -35,6 +35,8 @@ export interface ChatMessage {
   content: string;
   toolCalls?: ToolCallInfo[];
   streaming?: boolean;
+  /** Emma cayó al modelo LOCAL (cuotas cloud agotadas): la respuesta puede tardar más. */
+  localMode?: boolean;
 }
 
 export function useChat(sessionId: string) {
@@ -185,6 +187,11 @@ function applyEvent(
           : tc,
       ),
     };
+  }
+  // Failover SILENCIOSO: los saltos entre proveedores de nube no se muestran. Solo se marca el
+  // modo LOCAL (Ollama), que es más lento, para que el chat no parezca colgado durante la espera.
+  if (event.type === 'provider_switched' && event.toProvider === 'ollama') {
+    return { ...msg, localMode: true };
   }
   return msg;
 }

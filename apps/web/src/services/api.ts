@@ -1,11 +1,13 @@
 export interface StreamEvent {
-  type: 'text_delta' | 'tool_start' | 'tool_end' | 'error' | 'done';
+  type: 'text_delta' | 'tool_start' | 'tool_end' | 'error' | 'done' | 'provider_switched';
   text?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string;
   error?: string;
   sessionId?: string;
+  fromProvider?: string;
+  toProvider?: string;
 }
 
 const GATEWAY_URL = import.meta.env['VITE_GATEWAY_URL'] ?? 'http://localhost:3000';
