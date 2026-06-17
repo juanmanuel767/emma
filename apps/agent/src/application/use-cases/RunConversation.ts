@@ -198,9 +198,15 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
       let currentToolName: string | null = null;
       let currentToolInputRaw = '';
 
-      const relevantTools = toolsDisabled
+      // Charla TRIVIAL (saludos, gracias, ok): no se envían herramientas a NINGÚN proveedor. Un
+      // "hola" con ~10 esquemas de tools + system prompt revienta el límite de tokens/minuto del
+      // plan gratis de Groq (→ 429 → cascada lenta). Sin tools, la petición es pequeña y Groq
+      // responde en <1s. (El piso local también va mucho más rápido sin tools.)
+      const lastUserText = (params.messages.at(-1)?.content ?? '').trim();
+      const trivialChat = RunConversation.#TRIVIAL_CHAT_RE.test(lastUserText);
+      const relevantTools = (toolsDisabled || trivialChat)
         ? []
-        : selectRelevantTools(params.messages.at(-1)?.content ?? '', this.toolRegistry.toLLMTools());
+        : selectRelevantTools(lastUserText, this.toolRegistry.toLLMTools());
       // El texto se emite a través de un redactor que retiene la palabra parcial en curso
       // hasta el siguiente espacio, de modo que ninguna credencial sale entera al señor (SEC-11).
       const redactor = this.#makeRedactor();
@@ -564,6 +570,11 @@ JSON:`;
   }
 
   // Palabras que delatan una petición de razonamiento profundo → conviene Claude.
+  // Charla trivial: si TODO el mensaje es un saludo/agradecimiento/confirmación, no se envían
+  // herramientas (ahorra tokens y mantiene a Groq bajo su límite por minuto). Tolera ¿¡/acentos.
+  static readonly #TRIVIAL_CHAT_RE =
+    /^[¿¡\s]*(?:hola|buen[oa]s(?:\s*(?:d[ií]as|tardes|noches))?|hey|qu[eé]\s*tal|saludos|(?:muchas\s*)?gracias|ok|okay|vale|listo|perfecto|genial|de acuerdo|entendido|adi[oó]s|chao|hasta luego|c[oó]mo\s*est[aá]s|qu[eé]\s*haces|bien|s[ií]|no|claro|dale|jaja+|jeje+)(?:[\s,]+(?:emma|emmita|se[ñn]or))*[\s!?.,]*$/i;
+
   static readonly #COMPLEX_HINTS = /\b(analiza|análisis|analizar|planifica|planea|plan\b|estrategia|estrateg|dise[ñn]a|dise[ñn]o|arquitect|refactor|depura|debug|optimiza|compara|comparativa|razona|explica por qu[eé]|justifica|demuestra|resuelve|c[oó]digo|programa|script|algoritmo|redacta|escribe un|ensayo|informe detallado|investiga a fondo|pros y contras|ventajas y desventajas)\b/i;
 
   /**

@@ -24,8 +24,10 @@ export interface ProviderStatus {
  * Manages multiple LLM providers with automatic fallback.
  * Priority order: providers[0] → ... → ollama (always last)
  */
-const COOLDOWN_MS = 5 * 60_000; // tras un rate-limit, esperar 5 min antes de re-probar (evita
-                                // re-descubrir toda la cascada de agotados cada minuto)
+// Rate-limit POR MINUTO (p.ej. Groq): cooldown CORTO para re-probar pronto — Groq se recupera
+// en ~60s y es el más rápido; un cooldown largo lo dejaba fuera y forzaba fallbacks lentos.
+// El re-probar es barato (un 429 tarda ~0.4s) y ahora es SILENCIOSO (no molesta al señor).
+const COOLDOWN_MS = 45_000;
 const DAILY_COOLDOWN_MS = 60 * 60_000; // límite DIARIO agotado: no insistir cada minuto
 
 export class LLMProviderManager implements ILLMAdapter {

@@ -52,13 +52,14 @@ const envSchema = z.object({
   // Modelos gratis de OpenCode Zen como cadena de fallback (separados por coma). Todos con tools.
   // Orden: RÁPIDOS primero (deepseek-flash ~2s, mimo, north-mini); nemotron-ultra 550B al final
   // (más capaz pero ~5.5s/saludo y ~37s con herramientas → solo como último recurso).
+  // Solo modelos RÁPIDOS en la rotación diaria. Los gigantes lentos (nemotron-ultra 550B,
+  // nemotron-super 120B) se excluyen: "funcionan" pero tardan ~37s+ y dejaban a Emma lentísima
+  // para un simple "hola". Si los rápidos se agotan, es preferible caer al piso LOCAL veloz.
   OPENCODE_MODELS: z.string().default(
-    'deepseek-v4-flash-free,mimo-v2.5-free,north-mini-code-free,nemotron-3-ultra-free',
+    'deepseek-v4-flash-free,mimo-v2.5-free,north-mini-code-free',
   ),
-  // Cadena de modelos gratis (separados por coma) que se registran como fallback.
-  // Por defecto: solo modelos con ~1M tokens de contexto.
   OPENROUTER_MODELS: z.string().default(
-    'qwen/qwen3-coder:free,nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3-super-120b-a12b:free',
+    'qwen/qwen3-coder:free',
   ),
   VOYAGE_API_KEY: z.string().transform((v) => v || undefined).optional(),
   DATABASE_URL: z.string().url(),

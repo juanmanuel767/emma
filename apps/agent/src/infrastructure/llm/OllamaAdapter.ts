@@ -48,17 +48,24 @@ export class OllamaAdapter implements ILLMAdapter {
     private readonly heavyModel?: string,
   ) {}
 
-  /** Elige el modelo local según la complejidad del turno. */
-  #pickModel(messages: Message[], options: LLMCompletionOptions): string {
-    if (!this.heavyModel || this.heavyModel === this.model) return this.model;
-    // En medio de un bucle de herramientas (el último mensaje es un resultado de tool): modelo fuerte.
+  /**
+   * Planifica el turno local: qué modelo usar y si pasar herramientas.
+   * CLAVE de rendimiento: los modelos pequeños en CPU se CUELGAN con definiciones de tools
+   * (el 1B tarda >90s con tools vs ~9s sin ellas). Por eso la charla trivial va al modelo rápido
+   * y SIN herramientas (un "hola" no las necesita). Las tareas van al modelo fuerte CON tools.
+   */
+  #plan(messages: Message[]): { model: string; useTools: boolean } {
+    // En medio de un bucle de herramientas: hay que poder seguir usando tools → modelo fuerte.
     const last = messages[messages.length - 1];
-    if (last?.role === 'tool') return this.heavyModel;
-    // Sin herramientas disponibles y mensaje trivial → modelo rápido.
+    if (last?.role === 'tool') {
+      return { model: this.heavyModel ?? this.model, useTools: true };
+    }
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     const text = (lastUser?.content ?? '').trim();
-    const trivial = text.length <= 60 && TRIVIAL_RE.test(text);
-    return trivial ? this.model : this.heavyModel;
+    const trivial = text.length <= 80 && TRIVIAL_RE.test(text);
+    if (trivial) return { model: this.model, useTools: false };
+    // Tarea real: modelo fuerte con herramientas (si no hay heavyModel, el base con tools).
+    return { model: this.heavyModel ?? this.model, useTools: true };
   }
 
   async *stream(
@@ -66,8 +73,8 @@ export class OllamaAdapter implements ILLMAdapter {
     options: LLMCompletionOptions,
   ): AsyncIterable<LLMStreamEvent> {
     const ollamaMessages = this.#toOllamaMessages(messages, options.systemPrompt);
-    const tools = options.tools?.map(this.#toOllamaTool);
-    const model = this.#pickModel(messages, options);
+    const { model, useTools } = this.#plan(messages);
+    const tools = useTools ? options.tools?.map(this.#toOllamaTool) : undefined;
 
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: 'POST',
@@ -77,8 +84,8 @@ export class OllamaAdapter implements ILLMAdapter {
         messages: ollamaMessages,
         tools: tools?.length ? tools : undefined,
         stream: true,
-        keep_alive: '30m', // mantener el modelo en RAM: piso local instantáneo entre turnos
-        options: { temperature: 0.7, num_ctx: 8192 },
+        keep_alive: '20m', // mantener el modelo en RAM entre turnos (Ollama: 1 modelo a la vez)
+        options: { temperature: 0.7, num_ctx: 4096 }, // KV cache más pequeña: clave en RAM ajustada
       }),
       signal: options.signal,
     });
@@ -145,7 +152,7 @@ export class OllamaAdapter implements ILLMAdapter {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: this.#pickModel(messages, options),
+        model: this.#plan(messages).model,
         messages: ollamaMessages,
         stream: false,
         keep_alive: '30m',
