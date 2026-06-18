@@ -537,6 +537,50 @@ export function registerHandlers(bot: Bot<Context>, gateway: GatewayClient, opts
     }
   });
 
+  // ── Documents (PDF / Word / Excel / imágenes enviadas como archivo) ─────────────
+  // Se descarga a /tmp/emma/ con su extensión real y se pasa al agente con el mismo
+  // marcador que la web; FileTool extrae el texto (PDF→pdftotext, docx/xlsx→stdlib).
+  bot.on('message:document', async (ctx) => {
+    const chatId = ctx.chat.id;
+    const userId = String(ctx.from?.id ?? chatId);
+    const doc = ctx.message.document;
+
+    const statusMsg = await ctx.reply('📎 Recibiendo archivo...');
+    try {
+      const origName = doc.file_name ?? 'archivo';
+      const dot = origName.lastIndexOf('.');
+      const ext = dot >= 0 ? origName.slice(dot).toLowerCase() : '';
+
+      const file = await ctx.api.getFile(doc.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
+      const res = await fetch(fileUrl);
+      if (!res.ok) throw new Error(`Failed to download document: ${res.status}`);
+      const buffer = Buffer.from(await res.arrayBuffer());
+
+      mkdirSync('/tmp/emma', { recursive: true });
+      const savePath = `/tmp/emma/doc-${Date.now()}${ext || '.bin'}`;
+      writeFileSync(savePath, buffer);
+
+      const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(ext);
+      const marker = isImage
+        ? `[imagen adjunta guardada en: ${savePath}]`
+        : `[archivo adjunto guardado en: ${savePath}]`;
+      const caption = ctx.message.caption?.trim();
+      const lead =
+        caption ||
+        (isImage ? '¿Qué ves en esta imagen? Descríbela.' : 'Revisa este archivo adjunto y dime qué es, por favor.');
+      const userMessage = `${lead}\n${marker}`;
+
+      await ctx.api.deleteMessage(chatId, statusMsg.message_id).catch(() => null);
+      await processMessage(ctx, gateway, userMessage, chatId, userId, false);
+    } catch (err) {
+      logger.error({ err }, 'Document processing error');
+      await ctx.api
+        .editMessageText(chatId, statusMsg.message_id, '❌ Error al procesar el archivo.')
+        .catch(() => null);
+    }
+  });
+
   // ── Text messages ─────────────────────────────────────────────────────────────
   bot.on('message:text', async (ctx) => {
     const chatId = ctx.chat.id;
