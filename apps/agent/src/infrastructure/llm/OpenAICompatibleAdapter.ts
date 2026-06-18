@@ -224,11 +224,17 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
   #toOAIMessages(messages: Message[], systemPrompt?: string): OAIMessage[] {
     const result: OAIMessage[] = [];
     if (systemPrompt) result.push({ role: 'system', content: systemPrompt });
+    // Ids de tool_call ya emitidos por un assistant. Un mensaje 'tool' SOLO es válido si responde
+    // a uno de ellos; si queda huérfano (p.ej. tras un salto de proveedor a mitad de bucle), el
+    // proveedor rechaza el lote con 400. Lo convertimos en nota de usuario para no perder el dato.
+    const emittedToolCallIds = new Set<string>();
     for (const msg of messages) {
       if (msg.role === 'user') {
         result.push({ role: 'user', content: msg.content });
       } else if (msg.role === 'assistant') {
         if (msg.toolCall) {
+          const id = msg.toolCall.id ?? crypto.randomUUID();
+          emittedToolCallIds.add(id);
           result.push({
             role: 'assistant',
             content: msg.content || null,
@@ -236,7 +242,7 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
             // vuelva en el replay; un string vacío satisface la validación
             ...(this.#providerName === 'opencode' ? { reasoning_content: '' } : {}),
             tool_calls: [{
-              id: msg.toolCall.id ?? crypto.randomUUID(),
+              id,
               type: 'function',
               function: { name: msg.toolCall.name, arguments: JSON.stringify(msg.toolCall.input) },
             }],
@@ -245,11 +251,19 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
           result.push({ role: 'assistant', content: msg.content });
         }
       } else if (msg.role === 'tool' && msg.toolResult) {
-        result.push({
-          role: 'tool',
-          content: msg.toolResult.output,
-          tool_call_id: msg.toolResult.toolCallId,
-        });
+        if (emittedToolCallIds.has(msg.toolResult.toolCallId)) {
+          result.push({
+            role: 'tool',
+            content: msg.toolResult.output,
+            tool_call_id: msg.toolResult.toolCallId,
+          });
+        } else {
+          // Huérfano: preservar el contenido como contexto sin romper el protocolo.
+          result.push({
+            role: 'user',
+            content: `[Resultado de herramienta ${msg.toolResult.toolName}]\n${msg.toolResult.output}`,
+          });
+        }
       }
     }
     return result;
