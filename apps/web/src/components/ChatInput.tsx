@@ -2,10 +2,12 @@ import { useState, useRef, type KeyboardEvent } from 'react';
 import { uploadFile, transcribeAudio, type UploadResult } from '../services/api.js';
 
 interface Props {
-  onSend: (message: string) => void;
+  onSend: (message: string, opts?: { voice?: boolean; userAudioUrl?: string }) => void;
   onStop: () => void;
   isLoading: boolean;
 }
+
+const GATEWAY_URL = import.meta.env['VITE_GATEWAY_URL'] ?? 'http://localhost:3000';
 
 const ACCEPT =
   'image/*,audio/*,.pdf,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.mp4';
@@ -108,10 +110,20 @@ export function ChatInput({ onSend, onStop, isLoading }: Props) {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
         setTranscribing(true);
         try {
-          const text = await transcribeAudio(blob);
-          if (text) {
-            setValue((prev) => (prev ? `${prev} ${text}` : text));
-            textareaRef.current?.focus();
+          const ext = blob.type.includes('ogg') ? 'ogg' : 'webm';
+          const file = new File([blob], `voz.${ext}`, { type: blob.type || 'audio/webm' });
+          // Transcribir (para que Emma entienda) y subir la nota (para mostrarla) en paralelo.
+          const [text, up] = await Promise.all([
+            transcribeAudio(blob),
+            uploadFile(file).catch(() => null),
+          ]);
+          const clean = text.trim();
+          if (clean) {
+            // Se envía sola, como en Telegram, marcada como voz → Emma responde hablando.
+            onSend(clean, {
+              voice: true,
+              userAudioUrl: up ? `${GATEWAY_URL}${up.url}` : undefined,
+            });
           } else {
             setNotice('No entendí el audio, señor. Inténtelo de nuevo.');
           }

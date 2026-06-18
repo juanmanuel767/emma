@@ -32,6 +32,14 @@ export function MessageBubble({ message }: Props) {
           <span className="inline-block w-0.5 h-4 bg-gray-400 animate-pulse ml-0.5 align-middle" />
         )}
         {media.length > 0 && <MediaPreview paths={media} />}
+        {message.audioUrl && (
+          <audio
+            src={message.audioUrl}
+            controls
+            autoPlay={!isUser}
+            className="mt-2 w-full max-w-[280px] h-9"
+          />
+        )}
       </div>
 
       {!isUser && message.localMode && (

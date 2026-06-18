@@ -3,7 +3,60 @@ import { z } from 'zod';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { extname, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import type { AgentClient } from '../../../infrastructure/agent-client/AgentClient.js';
+
+// ── Síntesis de voz (Piper) — mismo motor y voz que el bot de Telegram ──────────
+const PIPER_BIN = `${homedir()}/.emma/piper/piper/piper`;
+const PIPER_MODEL = `${homedir()}/.emma/piper/voices/es_ES-sharvard-medium.onnx`;
+
+/** Limpia markdown/emojis/enlaces para que el TTS no lea símbolos. */
+function cleanForTts(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' código omitido ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/[*_#>~|]/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, ' enlace ')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1500);
+}
+
+/** Sintetiza texto a una nota de voz OGG/Opus en /tmp/emma; devuelve el nombre de archivo o null. */
+async function synthesizeVoice(text: string): Promise<string | null> {
+  if (!existsSync(PIPER_BIN) || !existsSync(PIPER_MODEL)) return null;
+  const clean = cleanForTts(text);
+  if (!clean) return null;
+
+  const name = `reply-${randomUUID()}`;
+  const wav = `${MEDIA_DIR}/${name}.wav`;
+  try {
+    await mkdir(MEDIA_DIR, { recursive: true });
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn(PIPER_BIN, ['--model', PIPER_MODEL, '--speaker', '1', '--output_file', wav]);
+      p.on('error', reject);
+      p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`piper exit ${code}`))));
+      p.stdin.on('error', () => {});
+      p.stdin.write(clean);
+      p.stdin.end();
+    });
+    if (!existsSync(wav)) return null;
+    // WAV → OGG Opus (más liviano para el navegador)
+    const ogg = `${MEDIA_DIR}/${name}.ogg`;
+    const ok = await new Promise<boolean>((resolve) => {
+      const p = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-i', wav, '-c:a', 'libopus', '-b:a', '32k', '-ar', '48000', ogg]);
+      p.on('error', () => resolve(false));
+      p.on('close', (code) => resolve(code === 0));
+    });
+    return ok && existsSync(ogg) ? `${name}.ogg` : `${name}.wav`;
+  } catch {
+    return null;
+  }
+}
 
 const bodySchema = z.object({
   message: z.string().min(1).max(32_000),
@@ -39,6 +92,7 @@ function kindFor(ext: string): 'image' | 'audio' | 'file' | null {
 const MEDIA_TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
   '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4',
+  '.webm': 'audio/webm', '.m4a': 'audio/mp4',
 };
 
 export const chatRoutes: FastifyPluginAsync<{ agentClient: AgentClient; groqApiKey?: string }> = async (
@@ -187,6 +241,15 @@ export const chatRoutes: FastifyPluginAsync<{ agentClient: AgentClient; groqApiK
     } catch (err) {
       return reply.status(502).send({ error: (err as Error).message });
     }
+  });
+
+  // Convierte el texto de la respuesta de Emma en una nota de voz (Piper), igual que Telegram.
+  fastify.post('/speak', { bodyLimit: 1_000_000 }, async (req, reply) => {
+    const parsed = z.object({ text: z.string().min(1).max(8000) }).safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
+    const file = await synthesizeVoice(parsed.data.text);
+    if (!file) return reply.status(503).send({ error: 'Síntesis de voz no disponible (Piper no instalado).' });
+    return reply.send({ url: `/media/${file}`, path: `${MEDIA_DIR}/${file}` });
   });
 
   fastify.get('/skills', async (_req, reply) => {

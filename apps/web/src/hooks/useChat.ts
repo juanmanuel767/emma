@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { streamChat, saveSettings, type StreamEvent } from '../services/api.js';
+import { streamChat, saveSettings, speak, type StreamEvent } from '../services/api.js';
 
 // Paridad con el bot de Telegram: una clave API pegada en el chat se guarda en
 // Integraciones sin pasar por el LLM. El orden importa (sk-or- antes que sk-).
@@ -37,6 +37,14 @@ export interface ChatMessage {
   streaming?: boolean;
   /** Emma cayó al modelo LOCAL (cuotas cloud agotadas): la respuesta puede tardar más. */
   localMode?: boolean;
+  /** Nota de voz asociada: del señor (su grabación) o de Emma (respuesta hablada). */
+  audioUrl?: string;
+}
+
+/** Opciones de envío: si fue por voz, se reproduce la respuesta hablada y se muestra la nota del señor. */
+export interface SendOptions {
+  voice?: boolean;
+  userAudioUrl?: string;
 }
 
 export function useChat(sessionId: string) {
@@ -46,7 +54,7 @@ export function useChat(sessionId: string) {
   const abortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: SendOptions) => {
       if (!text.trim() || isLoading) return;
 
       abortRef.current?.abort();
@@ -104,6 +112,7 @@ export function useChat(sessionId: string) {
         id: crypto.randomUUID(),
         role: 'user',
         content: text,
+        audioUrl: opts?.userAudioUrl,
       };
 
       const assistantId = crypto.randomUUID();
@@ -118,9 +127,11 @@ export function useChat(sessionId: string) {
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
       let currentToolCall: ToolCallInfo | null = null;
+      let assistantText = '';
 
       try {
         for await (const event of streamChat(text, sessionId, abortRef.current.signal)) {
+          if (event.type === 'text_delta' && event.text) assistantText += event.text;
           setMessages((prev) =>
             prev.map((m) => {
               if (m.id !== assistantId) return m;
@@ -129,6 +140,18 @@ export function useChat(sessionId: string) {
           );
 
           if (event.type === 'done') break;
+        }
+
+        // Si el señor escribió por voz, Emma responde también por voz (como en Telegram).
+        if (opts?.voice && assistantText.trim()) {
+          try {
+            const audioUrl = await speak(assistantText);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, audioUrl } : m)),
+            );
+          } catch {
+            // Si la síntesis falla, la respuesta de texto ya está visible — no molestar al señor.
+          }
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {

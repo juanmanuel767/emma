@@ -320,6 +320,18 @@ export async function uploadFile(file: File): Promise<UploadResult> {
   return body;
 }
 
+/** Sintetiza la respuesta de Emma como nota de voz (Piper) y devuelve la URL del audio. */
+export async function speak(text: string): Promise<string> {
+  const res = await fetch(`${GATEWAY_URL}/speak`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  const body = (await res.json()) as { url?: string; error?: string };
+  if (!res.ok || !body.url) throw new Error(body.error ?? `Error ${res.status} al sintetizar voz`);
+  return `${GATEWAY_URL}${body.url}`;
+}
+
 /** Transcribe una nota de voz grabada en el navegador (Groq Whisper vía gateway). */
 export async function transcribeAudio(blob: Blob): Promise<string> {
   const data = await fileToBase64(blob);
