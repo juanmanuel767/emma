@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat, mkdir } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -11,6 +11,57 @@ const execFileAsync = promisify(execFile);
 // Tope de texto devuelto al modelo: un archivo enorme (o un PDF largo) reventaría el límite
 // de tokens/minuto del proveedor gratis (Groq: 12k TPM) y rompería el bucle de herramientas.
 const MAX_TEXT_CHARS = 24_000;
+
+// Extractor de Office (Word/Excel) en Python con SOLO stdlib (zipfile+xml): docx y xlsx son
+// ZIP+XML, así que no hace falta LibreOffice (pesado) ni librerías externas. Se escribe una vez
+// en /tmp/emma y se invoca con (ruta, tipo). String.raw preserva los \t y \n del script.
+const OFFICE_SCRIPT_PATH = '/tmp/emma/.office_extract.py';
+const OFFICE_SCRIPT = String.raw`import sys, zipfile
+from xml.etree import ElementTree as ET
+path, kind = sys.argv[1], sys.argv[2]
+z = zipfile.ZipFile(path)
+def ln(tag): return tag.rsplit('}', 1)[-1]
+if kind == 'docx':
+    root = ET.fromstring(z.read('word/document.xml'))
+    out = []
+    for p in root.iter():
+        if ln(p.tag) == 'p':
+            out.append(''.join(n.text for n in p.iter() if ln(n.tag) == 't' and n.text))
+    print('\n'.join(out))
+else:
+    shared = []
+    try:
+        ss = ET.fromstring(z.read('xl/sharedStrings.xml'))
+        for si in ss:
+            if ln(si.tag) == 'si':
+                shared.append(''.join(t.text or '' for t in si.iter() if ln(t.tag) == 't'))
+    except KeyError:
+        pass
+    sheets = sorted(n for n in z.namelist() if n.startswith('xl/worksheets/sheet') and n.endswith('.xml'))
+    for name in sheets:
+        root = ET.fromstring(z.read(name))
+        for row in root.iter():
+            if ln(row.tag) != 'row':
+                continue
+            cells = []
+            for c in row:
+                if ln(c.tag) != 'c':
+                    continue
+                t = c.get('t')
+                v = None
+                for ch in c:
+                    if ln(ch.tag) == 'v':
+                        v = ch.text
+                    elif ln(ch.tag) == 'is':
+                        v = ''.join(x.text or '' for x in ch.iter() if ln(x.tag) == 't')
+                if v is None:
+                    cells.append('')
+                elif t == 's':
+                    cells.append(shared[int(v)] if v.isdigit() and int(v) < len(shared) else '')
+                else:
+                    cells.append(v)
+            print('\t'.join(cells))
+`;
 
 const ALLOWED_READ_PREFIXES = [
   process.env['HOME'] ?? '/home/user',
@@ -47,7 +98,7 @@ type Input = z.infer<typeof inputSchema>;
 export class FileTool implements ITool<Input> {
   readonly name = 'file_system';
   readonly description =
-    'Read, write, or list files. Write access is restricted to /tmp/emma. Read access is limited to the home directory. PDF files are automatically extracted to plain text — use action "read" on a .pdf to get its text content. Attachments uploaded by the user live in /tmp/emma/.';
+    'Read, write, or list files. Write access is restricted to /tmp/emma. Read access is limited to the home directory. PDF, Word (.docx) and Excel (.xlsx) files are automatically extracted to plain text — use action "read" on them to get their content. Attachments uploaded by the user live in /tmp/emma/.';
   readonly inputSchema = inputSchema;
 
   async execute(input: Input, _ctx: ToolContext): Promise<ToolResult> {
@@ -56,9 +107,22 @@ export class FileTool implements ITool<Input> {
     if (input.action === 'read') {
       this.#assertReadPermission(path);
       try {
-        // PDF → extraer texto con pdftotext (leerlo como utf8 daría binario ilegible y enorme)
-        if (input.encoding !== 'base64' && extname(path).toLowerCase() === '.pdf') {
-          return { success: true, data: this.#cap(await this.#extractPdfText(path)) };
+        // PDF / Word / Excel → extraer texto (leerlos como utf8 daría binario ilegible y enorme)
+        if (input.encoding !== 'base64') {
+          const ext = extname(path).toLowerCase();
+          if (ext === '.pdf') {
+            return { success: true, data: this.#cap(await this.#extractPdfText(path)) };
+          }
+          if (ext === '.docx' || ext === '.xlsx') {
+            const kind = ext === '.docx' ? 'docx' : 'xlsx';
+            return { success: true, data: this.#cap(await this.#extractOfficeText(path, kind)) };
+          }
+          if (ext === '.doc' || ext === '.xls') {
+            return {
+              success: true,
+              data: `[El archivo '${path}' está en formato Office antiguo (${ext}, binario OLE) que no puedo extraer directamente. Si lo guarda como ${ext === '.doc' ? '.docx' : '.xlsx'} podré leerlo, señor.]`,
+            };
+          }
         }
         const content = await readFile(path, input.encoding as BufferEncoding);
         // Si pidieron texto pero el archivo es binario, no devolver "mojibake" (engaña al modelo
@@ -130,6 +194,22 @@ export class FileTool implements ITool<Input> {
       );
     } catch (err) {
       return `[No pude extraer el texto del PDF: ${(err as Error).message}. ¿pdftotext (poppler-utils) está instalado?]`;
+    }
+  }
+
+  /** Extrae el texto de un Word (.docx) o Excel (.xlsx) con un script Python de solo stdlib. */
+  async #extractOfficeText(path: string, kind: 'docx' | 'xlsx'): Promise<string> {
+    try {
+      await mkdir('/tmp/emma', { recursive: true });
+      await writeFile(OFFICE_SCRIPT_PATH, OFFICE_SCRIPT, 'utf8');
+      const { stdout } = await execFileAsync('python3', [OFFICE_SCRIPT_PATH, path, kind], {
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const text = stdout.trim();
+      const label = kind === 'docx' ? 'documento de Word' : 'hoja de Excel';
+      return text || `[El ${label} no contiene texto extraíble, señor.]`;
+    } catch (err) {
+      return `[No pude extraer el texto del ${kind}: ${(err as Error).message}.]`;
     }
   }
 
