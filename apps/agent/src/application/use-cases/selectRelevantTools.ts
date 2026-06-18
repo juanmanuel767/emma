@@ -15,6 +15,7 @@ const TOOL_KEYWORDS: Record<string, string[]> = {
   get_system_info: ['sistema', 'system', 'cpu', 'ram', 'memoria', 'memory', 'disco', 'disk', 'proceso', 'process', 'uptime', 'hardware'],
   execute_command: ['comando', 'command', 'bash', 'shell', 'terminal', 'ejecuta', 'run', 'script'],
   file_system: ['archivo', 'file', 'directorio', 'directory', 'carpeta', 'folder', 'read', 'write', 'lee', 'escribe'],
+  monitor_page: ['monitor', 'monitorea', 'monitorear', 'vigila', 'vigilar', 'cambios', 'cambio', 'avísame', 'avisame', 'avisa', 'alerta', 'alértame', 'novedad', 'novedades', 'revisa la página', 'pendiente', 'actualización', 'actualizacion', 'se actualiza'],
   browser: ['navega', 'navegador', 'browse', 'browser', 'screenshot', 'captura', 'click', 'web', 'página', 'page', 'url', 'sitio', 'scrape', 'extrae', 'extrae texto', 'formulario', 'form'],
   web_search: ['busca', 'search', 'google', 'noticia', 'news', 'encuentra', 'find', 'internet'],
   email: ['email', 'correo', 'mail', 'mensaje', 'envía', 'envia', 'inbox', 'bandeja', 'gmail', 'lee correo', 'leer correo', 'escribir correo', 'responde correo'],

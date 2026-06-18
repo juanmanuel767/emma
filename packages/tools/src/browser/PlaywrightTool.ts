@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { ITool, ToolContext, ToolResult } from '../registry/ITool.js';
 
@@ -10,6 +11,7 @@ const inputSchema = z.object({
   selector: z.string().optional().describe('CSS or text selector for click/fill actions. For text-based: use text="More information..." or XPath like //a[contains(text(),"More")]'),
   value: z.string().optional().describe('Text value for fill action'),
   path: z.string().optional().describe('File path for screenshot (default: /tmp/emma/screenshot.png)'),
+  headless: z.boolean().optional().describe('Whether to run browser in headless mode. Set to false to interactively log in or debug.'),
 });
 
 type Input = z.infer<typeof inputSchema>;
@@ -17,14 +19,15 @@ type Input = z.infer<typeof inputSchema>;
 export class PlaywrightTool implements ITool<Input> {
   readonly name = 'browser';
   readonly description =
-    'Control a headless browser. Navigate URLs, take screenshots, extract text, click elements, fill forms. ' +
+    'Control a browser with a persistent profile (saves cookies/logins). Navigate URLs, take screenshots, extract text, click elements, fill forms. ' +
     'For click: use selector="text=Link Text" to click by visible text, or a CSS selector. ' +
-    'The browser persists across calls in the same session.';
+    'The browser persists across calls in the same session. Set headless=false to log in.';
   readonly inputSchema = inputSchema;
 
-  // Browser instance is lazily initialized and reused within a session
-  #browser: import('playwright').Browser | null = null;
+  // Browser context and page are lazily initialized and reused within a session
+  #context: import('playwright').BrowserContext | null = null;
   #page: import('playwright').Page | null = null;
+  #currentHeadless: boolean | null = null;
 
   async execute(input: Input, _ctx: ToolContext): Promise<ToolResult> {
     if (input.action === 'close') {
@@ -33,7 +36,10 @@ export class PlaywrightTool implements ITool<Input> {
     }
 
     try {
-      await this.#ensureBrowser();
+      const headlessEnv = process.env.BROWSER_HEADLESS;
+      const headless = input.headless ?? (headlessEnv === 'false' ? false : true);
+
+      await this.#ensureBrowser(headless);
       const page = this.#page!;
 
       if (input.action === 'navigate') {
@@ -133,9 +139,9 @@ export class PlaywrightTool implements ITool<Input> {
     }
   }
 
-  async #ensureBrowser(): Promise<void> {
-    // Check if existing browser/page is still usable
-    if (this.#browser && this.#page) {
+  async #ensureBrowser(headless: boolean): Promise<void> {
+    // If headless mode changes or context/page is closed, recreate
+    if (this.#context && this.#page && this.#currentHeadless === headless) {
       try {
         // Quick check: if page is closed/crashed, this throws
         await this.#page.evaluate('1');
@@ -144,24 +150,31 @@ export class PlaywrightTool implements ITool<Input> {
         // Page is gone — reset and reopen
         await this.#cleanup().catch(() => {});
       }
+    } else if (this.#context) {
+      // Headless mode changed — close and reopen with new headless setting
+      await this.#cleanup().catch(() => {});
     }
 
     const { chromium } = await import('playwright');
-    this.#browser = await chromium.launch({
-      headless: true,
+    const userDataDir = join(homedir(), '.emma', 'browser-profile');
+
+    this.#context = await chromium.launchPersistentContext(userDataDir, {
+      headless,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    });
-    const context = await this.#browser.newContext({
       userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 720 },
     });
-    this.#page = await context.newPage();
+    this.#currentHeadless = headless;
+
+    const pages = this.#context.pages();
+    this.#page = pages[0] ?? await this.#context.newPage();
   }
 
   async #cleanup(): Promise<void> {
     try { await this.#page?.close(); } catch { /* ignore */ }
-    try { await this.#browser?.close(); } catch { /* ignore */ }
-    this.#browser = null;
+    try { await this.#context?.close(); } catch { /* ignore */ }
+    this.#context = null;
     this.#page = null;
+    this.#currentHeadless = null;
   }
 }

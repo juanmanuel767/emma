@@ -11,3 +11,4 @@ export { PlaywrightTool } from './browser/PlaywrightTool.js';
 export { WebSearchTool } from './search/WebSearchTool.js';
 export { EmailTool } from './email/EmailTool.js';
 export { SshTool } from './system/SshTool.js';
+export { PageMonitorTool } from './monitor/PageMonitorTool.js';

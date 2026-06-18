@@ -11,7 +11,7 @@ import {
   RemindersSkill,
   createForgeSkill,
 } from '@emma/skills';
-import { CommandTool, FileTool, PlaywrightTool, WebSearchTool, SshTool, EmailTool } from '@emma/tools';
+import { CommandTool, FileTool, PlaywrightTool, WebSearchTool, SshTool, EmailTool, PageMonitorTool } from '@emma/tools';
 import type { ISkill } from '@emma/skills';
 import type { IMemoryRepository } from '@emma/core/ports';
 import { createMemorySkill } from './MemorySkill.js';
@@ -20,7 +20,7 @@ const legacyToolsSkill: ISkill = {
   name: 'core-tools',
   version: '1.0.0',
   description: 'Core tools: shell commands, file system, browser automation, web search, SSH.',
-  tools: [new CommandTool(), new FileTool(), new PlaywrightTool(), new WebSearchTool(), new SshTool(), new EmailTool()],
+  tools: [new CommandTool(), new FileTool(), new PlaywrightTool(), new WebSearchTool(), new SshTool(), new EmailTool(), new PageMonitorTool()],
 };
 
 export async function buildSkillRegistry(
