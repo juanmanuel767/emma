@@ -1,5 +1,6 @@
 import type { ILLMAdapter, LLMStreamEvent, LLMCompletionOptions } from '@emma/core/ports';
 import type { Message } from '@emma/core/entities';
+import { sanitizeToolSchema } from './sanitizeToolSchema.js';
 
 interface OllamaChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -201,7 +202,7 @@ export class OllamaAdapter implements ILLMAdapter {
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.inputSchema,
+        parameters: sanitizeToolSchema(tool.inputSchema),
       },
     };
   }

@@ -2,6 +2,7 @@ import Groq from 'groq-sdk';
 import type { ILLMAdapter, LLMStreamEvent, LLMCompletionOptions } from '@emma/core/ports';
 import type { Message } from '@emma/core/entities';
 import { QuotaExhaustedError } from './QuotaExhaustedError.js';
+import { sanitizeToolSchema } from './sanitizeToolSchema.js';
 
 type OAIMessage =
   | { role: 'system'; content: string }
@@ -286,7 +287,9 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
   #toOAITool(tool: { name: string; description: string; inputSchema: Record<string, unknown> }) {
     return {
       type: 'function' as const,
-      function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+      // Saneamos el esquema: una herramienta forjada con parámetros inválidos (type null) provoca
+      // un 400 que tumba TODAS las peticiones mientras exista. Nunca dejamos salir un esquema roto.
+      function: { name: tool.name, description: tool.description, parameters: sanitizeToolSchema(tool.inputSchema) },
     };
   }
 }
