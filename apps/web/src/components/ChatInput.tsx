@@ -1,5 +1,11 @@
-import { useState, useRef, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { uploadFile, transcribeAudio, type UploadResult } from '../services/api.js';
+
+function fmtElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 interface Props {
   onSend: (message: string, opts?: { voice?: boolean; userAudioUrl?: string }) => void;
@@ -19,11 +25,21 @@ export function ChatInput({ onSend, onStop, isLoading }: Props) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+
+  // Contador de segundos mientras se graba (se limpia solo al detener o desmontar).
+  useEffect(() => {
+    if (!recording) return;
+    setElapsed(0);
+    const started = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [recording]);
 
   const handleSend = () => {
     const trimmed = value.trim();
@@ -153,6 +169,21 @@ export function ChatInput({ onSend, onStop, isLoading }: Props) {
       <div className="max-w-4xl mx-auto flex flex-col gap-2">
         {notice && (
           <div className="text-[11px] text-amber-400/90 px-1">{notice}</div>
+        )}
+
+        {/* Indicador de grabación con contador */}
+        {recording && (
+          <div className="flex items-center gap-2 px-1 text-xs text-red-400">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span>Grabando… {fmtElapsed(elapsed)}</span>
+            <span className="text-gray-500">— pulse ⏹ para enviar</span>
+          </div>
+        )}
+        {transcribing && !recording && (
+          <div className="flex items-center gap-2 px-1 text-xs text-bee-glow">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-bee-glow animate-pulse" />
+            <span>Transcribiendo su nota de voz, señor…</span>
+          </div>
         )}
 
         {/* Adjuntos pendientes de enviar */}
