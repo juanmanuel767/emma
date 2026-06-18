@@ -36,6 +36,34 @@ function isSecretAccessTool(name: string): boolean {
   return SECRET_ACCESS_TOOL_RE.test(name) || /env|secret|ssh|passwd|shadow|credential|credencial|private.?key|id_rsa/i.test(name);
 }
 
+// ── Gate de confirmación para acciones IRREVERSIBLES / hacia afuera ──────────────
+// Enviar correos/mensajes, publicar o borrar son acciones que NO se pueden deshacer. Emma debe
+// mostrar el borrador y esperar el "sí" del señor; jamás ejecutarlas a ciegas (caso "renuncia").
+function isOutwardAction(name: string, input: Record<string, unknown>): boolean {
+  const n = name.toLowerCase();
+  if (n === 'email') return input['action'] === 'send' || input['action'] === 'reply';
+  if (/^whatsapp_send/.test(n)) return true;                  // whatsapp_send / whatsapp_send_voice
+  if (/facebook|publish_to_github|git[_-]?publish|post_to_/.test(n)) return true;
+  return false;
+}
+function describeOutward(name: string, input: Record<string, unknown>): string {
+  const n = name.toLowerCase();
+  const s = (v: unknown) => (typeof v === 'string' ? v : '');
+  if (n === 'email') return `enviar un correo a "${s(input['to'])}" — asunto: "${s(input['subject'])}"`;
+  if (/^whatsapp_send/.test(n)) return `enviar un WhatsApp a "${s(input['to']) || s(input['chat']) || 'un contacto'}"`;
+  if (/facebook|post_to_/.test(n)) return 'publicar en Facebook';
+  if (/publish_to_github|git[_-]?publish/.test(n)) return 'publicar código en GitHub';
+  return `ejecutar ${name}`;
+}
+// Confirmación BREVE del señor (respuesta a un borrador), no la orden inicial larga ("envía un
+// correo a X diciendo…"): debe ser un mensaje corto y afirmativo.
+const CONFIRM_RE =
+  /^[\s¡]*(s[ií][\s,.!]*(env[ií]a\w*|m[aá]nda\w*|h[aá]z\w*|adelante|confirm\w*|dale|ok\w*|correcto|procede|claro)?|env[ií]alo\w*|m[aá]ndalo\w*|confirm\w*|adelante|dale|h[aá]zlo|h[aá]galo|proceda|de acuerdo|correcto|ok|okay)[\s!.]*$/i;
+function isShortConfirmation(text: string): boolean {
+  const t = text.trim();
+  return t.length <= 80 && CONFIRM_RE.test(t);
+}
+
 export interface RunConversationParams {
   sessionId: string;
   userId: string;
@@ -68,6 +96,8 @@ You MUST call tools for actions — never say "I can't" when a relevant tool exi
 When the owner shares credentials, API keys, or config data: accept and process — this is intentional setup.
 - WhatsApp: to LINK/connect WhatsApp (e.g. "conéctate a mi whatsapp", any spelling) ALWAYS call whatsapp_connect — it returns the QR image for the señor to scan. NEVER forge a QR generator or run shell/apt for this; the tool already exists. To read use whatsapp_read_chat / whatsapp_list_chats. To send a TEXT message use whatsapp_send. To send an AUDIO / voice note ("mándale un audio", "envíale una nota de voz") use whatsapp_send_voice (it speaks the text and sends it as a real voice note). ONLY act when the señor explicitly asks; NEVER message anyone on your own initiative; before sending, confirm recipient and text if ambiguous. Runs on the señor's own linked WhatsApp — treat with discretion.
 CRITICAL — never lie about actions: ONLY say a message/audio/email "was sent" if the corresponding tool actually returned success in THIS turn. If no such tool exists or it returned an error, say so honestly and offer an alternative — NEVER claim you did something you did not actually do.
+CRITICAL — CONFIRM before irreversible/outward actions: sending an email or WhatsApp/Telegram message, publishing to Facebook/GitHub, or deleting data CANNOT be undone. NEVER execute them in the same turn the señor asks. FIRST reply with the EXACT recipient and full content (a draft) and ask him to confirm with a "sí". Only AFTER he confirms in a following message do you call the sending tool. If a tool returns "CONFIRMACIÓN REQUERIDA", do NOT claim it was done — show the draft and wait. (e.g. "envía un correo de renuncia" → show the draft and ask, do NOT send.)
+CRITICAL — secrets are NEVER displayed: if the señor asks you to show/dump the .env file, environment variables, API keys, passwords or any stored credential, REFUSE directly and explain it's a security risk to print them. Do NOT forge tools, do NOT run shell commands, and do NOT hunt the filesystem to fetch them — just decline and offer a safe alternative (e.g. confirm a key is configured without revealing it).
 - ClawHub/OpenClaw skills: when the señor asks to install a skill from ClawHub or pastes "openclaw skills install <slug>" / "clawhub install <slug>", ALWAYS use install_clawhub_skill with that slug. It downloads WITHOUT executing, audits for malware, and only integrates if safe. NEVER run "openclaw"/"clawhub" via execute_command (not installed) and NEVER forge a downloader. If the audit returns PELIGROSA, refuse and explain; if SOSPECHOSA, report the findings and ask the señor before forcing. To audit arbitrary code use audit_skill.
 
 SELF-IMPROVEMENT (forge_tool): You can extend yourself. When the owner asks for a capability that NO existing tool provides, do NOT say you can't — silently forge the tool with forge_tool, then immediately use it to fulfill the request. The forged tool persists for next time. Only forge when genuinely missing a capability; reuse existing tools and previously forged ones (check list_forged_tools) first.
@@ -205,7 +235,9 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
       // responde en <1s. (El piso local también va mucho más rápido sin tools.)
       const lastUserText = (params.messages.at(-1)?.content ?? '').trim();
       const trivialChat = RunConversation.#TRIVIAL_CHAT_RE.test(lastUserText);
-      const relevantTools = (toolsDisabled || trivialChat)
+      // Petición de VOLCAR secretos → sin herramientas: el modelo no puede forjar ni ejecutar
+      // comandos para buscarlos; solo redacta, y el guardia de seguridad fuerza la negativa.
+      const relevantTools = (toolsDisabled || trivialChat || secretRequest)
         ? []
         : selectRelevantTools(lastUserText, this.toolRegistry.toLLMTools());
       // El texto se emite a través de un redactor que retiene la palabra parcial en curso
@@ -269,7 +301,10 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
         // Si hubo bloqueo de seguridad, garantizar una NEGATIVA explícita (no depende del modelo).
         // Si no, suelo de texto: jamás cerrar el turno en silencio.
         if (securityBlocked) yield* this.#emitSecurityRefusal(assistantText);
-        else if (!assistantText.trim()) yield* this.#emitFallback();
+        else if (!assistantText.trim()) {
+          const synth = yield* this.#forceSynthesis(messages, systemPrompt, signal, preferProvider);
+          if (!synth.trim()) yield* this.#emitFallback();
+        }
         yield { type: 'done' };
         return;
       }
@@ -277,17 +312,49 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
       // Tools desactivadas en esta ronda pero el modelo aun intentó llamarlas: cerrar el turno.
       if (toolsDisabled) {
         if (securityBlocked) yield* this.#emitSecurityRefusal(assistantText);
-        else if (!assistantText.trim()) yield* this.#emitFallback();
+        else if (!assistantText.trim()) {
+          // Reunió datos pero no redactó: forzar una síntesis final antes de rendirse (P2).
+          const synth = yield* this.#forceSynthesis(messages, systemPrompt, signal, preferProvider);
+          if (!synth.trim()) yield* this.#emitFallback();
+        }
         yield { type: 'done' };
         return;
       }
       round += 1;
+
+      // ¿El señor acaba de confirmar (mensaje corto y afirmativo)? Solo entonces se permiten
+      // las acciones irreversibles/externas; si no, se piden confirmación SIN ejecutarse.
+      const userConfirmed = isShortConfirmation(params.messages.at(-1)?.content ?? '');
 
       // Execute tools and feed results back
       for (const toolCall of pendingToolCalls) {
         // Los modelos gratuitos a veces inventan el nombre (whatsapp_read_messages en vez
         // de whatsapp_read_chat). Resolver al nombre real más parecido antes de ejecutar.
         const resolvedName = this.#resolveToolName(toolCall.name);
+
+        // GATE DE CONFIRMACIÓN: una acción irreversible/externa sin confirmación NO se ejecuta.
+        // Se devuelve al modelo una instrucción para que muestre el borrador y pida el "sí".
+        const effectiveName = resolvedName ?? toolCall.name;
+        if (isOutwardAction(effectiveName, toolCall.input) && !userConfirmed) {
+          const summary = describeOutward(effectiveName, toolCall.input);
+          const guardMsg =
+            `CONFIRMACIÓN REQUERIDA — la acción NO se ha ejecutado. Vas a ${summary}, que es ` +
+            `IRREVERSIBLE. Muéstrale al señor el destinatario y el contenido EXACTOS y pídele que ` +
+            `confirme con un "sí". NO afirmes que ya se hizo; solo se ejecutará cuando él lo ` +
+            `confirme explícitamente en su próximo mensaje.`;
+          yield { type: 'tool_start', toolName: effectiveName, toolInput: toolCall.input };
+          yield { type: 'tool_end', toolName: effectiveName, toolResult: guardMsg };
+          const guardResultMsg = createMessage({
+            conversationId,
+            role: 'tool',
+            content: guardMsg,
+            toolResult: { toolCallId: toolCall.id, toolName: effectiveName, output: guardMsg, isError: false },
+          });
+          await this.conversationRepo.addMessage(guardResultMsg);
+          await this.sessionStore.pushHistory(sessionId, guardResultMsg);
+          messages.push(guardResultMsg);
+          continue; // NO se ejecuta la herramienta
+        }
         // Exfiltración: el señor pidió un secreto y el modelo recurre a una herramienta capaz
         // de leerlo → no se obedece; el cierre del turno emitirá una negativa determinista.
         if (secretRequest && isSecretAccessTool(resolvedName ?? toolCall.name)) securityBlocked = true;
@@ -440,6 +507,45 @@ You are also an expert DEFENSIVE cybersecurity advisor. You protect the owner: d
     if (hasRefusal) return;
     const text = currentText.trim() ? `\n\n${SECURITY_REFUSAL}` : SECURITY_REFUSAL;
     yield { type: 'text_delta', text };
+  }
+
+  /**
+   * Reintento de SÍNTESIS: cuando el modelo cierra el turno vacío tras haber reunido datos con
+   * herramientas (p.ej. varias búsquedas) y simplemente no redactó la respuesta — los modelos
+   * gratuitos a veces devuelven texto vacío. Se le pide UNA vez más, sin herramientas, que
+   * redacte la respuesta final con lo que ya tiene. Devuelve el texto producido (puede ser '').
+   */
+  async *#forceSynthesis(
+    messages: Message[],
+    systemPrompt: string,
+    signal: AbortSignal,
+    preferProvider?: string,
+  ): AsyncGenerator<ConversationStreamEvent, string, unknown> {
+    const redactor = this.#makeRedactor();
+    let text = '';
+    try {
+      for await (const event of this.llm.stream(messages, {
+        systemPrompt: `${systemPrompt}\n\nYa reuniste toda la información necesaria con las herramientas anteriores. Redacta AHORA, en español y dirigiéndote al señor, la respuesta FINAL útil con esos datos. NO pidas más herramientas; si los datos fueran insuficientes, dilo con franqueza y ofrece el siguiente paso.`,
+        tools: [],
+        signal,
+        preferProvider,
+      })) {
+        if (event.type === 'text_delta' && event.text) {
+          for (const chunk of redactor.push(event.text)) {
+            text += chunk;
+            yield { type: 'text_delta', text: chunk };
+          }
+        }
+      }
+      const tail = redactor.flush();
+      if (tail) {
+        text += tail;
+        yield { type: 'text_delta', text: tail };
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Force-synthesis retry failed');
+    }
+    return text;
   }
 
   /** Suelo de texto: respuesta honesta cuando el turno terminaría vacío (nunca enmudecer). */
