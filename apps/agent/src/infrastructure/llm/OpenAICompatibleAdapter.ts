@@ -224,16 +224,27 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
   #toOAIMessages(messages: Message[], systemPrompt?: string): OAIMessage[] {
     const result: OAIMessage[] = [];
     if (systemPrompt) result.push({ role: 'system', content: systemPrompt });
-    // Ids de tool_call ya emitidos por un assistant. Un mensaje 'tool' SOLO es válido si responde
-    // a uno de ellos; si queda huérfano (p.ej. tras un salto de proveedor a mitad de bucle), el
-    // proveedor rechaza el lote con 400. Lo convertimos en nota de usuario para no perder el dato.
+
+    // El protocolo de tool-calling es estricto y un salto de proveedor a mitad de bucle puede
+    // dejar el historial inconsistente de DOS formas, y AMBAS provocan un 400 que tumba el turno:
+    //   (a) un assistant con tool_calls SIN su respuesta 'tool' ("insufficient tool messages"), y
+    //   (b) un 'tool' huérfano sin su tool_calls previo ("must be a response to ... tool_calls").
+    // Sanitizamos en dos pasadas para que el lote enviado SIEMPRE sea válido:
+    //  Pasada 1 — qué tool_call_ids tienen de verdad una respuesta 'tool'.
+    const respondedIds = new Set<string>();
+    for (const msg of messages) {
+      if (msg.role === 'tool' && msg.toolResult) respondedIds.add(msg.toolResult.toolCallId);
+    }
+
+    //  Pasada 2 — emitir solo lo coherente.
     const emittedToolCallIds = new Set<string>();
     for (const msg of messages) {
       if (msg.role === 'user') {
         result.push({ role: 'user', content: msg.content });
       } else if (msg.role === 'assistant') {
-        if (msg.toolCall) {
-          const id = msg.toolCall.id ?? crypto.randomUUID();
+        const id = msg.toolCall?.id;
+        if (msg.toolCall && id && respondedIds.has(id)) {
+          // tool_call CON respuesta → válido como tal.
           emittedToolCallIds.add(id);
           result.push({
             role: 'assistant',
@@ -247,6 +258,9 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
               function: { name: msg.toolCall.name, arguments: JSON.stringify(msg.toolCall.input) },
             }],
           });
+        } else if (msg.toolCall) {
+          // tool_call COLGADO (sin respuesta, o sin id) → degradar a texto plano para no romper.
+          result.push({ role: 'assistant', content: msg.content || `(intenté usar ${msg.toolCall.name})` });
         } else {
           result.push({ role: 'assistant', content: msg.content });
         }
@@ -258,7 +272,7 @@ export class OpenAICompatibleAdapter implements ILLMAdapter {
             tool_call_id: msg.toolResult.toolCallId,
           });
         } else {
-          // Huérfano: preservar el contenido como contexto sin romper el protocolo.
+          // Huérfano: preservar el contenido como nota de usuario sin romper el protocolo.
           result.push({
             role: 'user',
             content: `[Resultado de herramienta ${msg.toolResult.toolName}]\n${msg.toolResult.output}`,
