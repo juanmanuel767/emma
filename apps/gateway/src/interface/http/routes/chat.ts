@@ -1,13 +1,38 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { extname, basename } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { AgentClient } from '../../../infrastructure/agent-client/AgentClient.js';
 
 const bodySchema = z.object({
   message: z.string().min(1).max(32_000),
   sessionId: z.string().optional(),
 });
+
+const MEDIA_DIR = '/tmp/emma';
+// Límite por ruta para subidas/audio (base64 infla ~33% → ~18 MB de archivo real).
+const UPLOAD_BODY_LIMIT = 26_214_400; // 25 MB
+
+// Extensiones que el señor puede ADJUNTAR (entrante). Imagen/audio se previsualizan;
+// el resto son archivos que el agente puede leer con sus herramientas.
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+const AUDIO_EXT = new Set(['.ogg', '.oga', '.wav', '.mp3', '.m4a', '.webm']);
+const FILE_EXT = new Set([
+  '.pdf', '.txt', '.md', '.csv', '.json', '.log', '.xml', '.yaml', '.yml',
+  '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.mp4',
+]);
+
+function extFromName(name: string): string {
+  return extname(name).toLowerCase();
+}
+
+function kindFor(ext: string): 'image' | 'audio' | 'file' | null {
+  if (IMAGE_EXT.has(ext)) return 'image';
+  if (AUDIO_EXT.has(ext)) return 'audio';
+  if (FILE_EXT.has(ext)) return 'file';
+  return null;
+}
 
 // Sirve los medios que Emma genera en /tmp/emma/ (QR, imágenes, audio) para que la web
 // pueda mostrarlos. Solo lectura, solo /tmp/emma/, extensiones de medios conocidas.
@@ -16,7 +41,7 @@ const MEDIA_TYPES: Record<string, string> = {
   '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4',
 };
 
-export const chatRoutes: FastifyPluginAsync<{ agentClient: AgentClient }> = async (
+export const chatRoutes: FastifyPluginAsync<{ agentClient: AgentClient; groqApiKey?: string }> = async (
   fastify,
   opts,
 ) => {
@@ -85,6 +110,82 @@ export const chatRoutes: FastifyPluginAsync<{ agentClient: AgentClient }> = asyn
       return reply.header('Content-Type', type).header('Cache-Control', 'public, max-age=300').send(buf);
     } catch {
       return reply.status(404).send({ error: 'Archivo no encontrado' });
+    }
+  });
+
+  // Subida de adjuntos del señor (imágenes/audio/archivos) → se guardan en /tmp/emma/ y se
+  // devuelve la ruta. La web la inserta como marcador en el mensaje; el agente ya sabe leer
+  // "[imagen adjunta guardada en: /tmp/emma/...]" (visión) y archivos con sus herramientas.
+  fastify.post('/upload', { bodyLimit: UPLOAD_BODY_LIMIT }, async (req, reply) => {
+    const parsed = z
+      .object({
+        name: z.string().min(1).max(200),
+        data: z.string().min(1), // base64 (sin prefijo data:)
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
+
+    const ext = extFromName(parsed.data.name);
+    const kind = kindFor(ext);
+    if (!kind) return reply.status(415).send({ error: `Tipo de archivo no permitido: ${ext || 'sin extensión'}` });
+
+    let buf: Buffer;
+    try {
+      buf = Buffer.from(parsed.data.data, 'base64');
+    } catch {
+      return reply.status(400).send({ error: 'base64 inválido' });
+    }
+    if (buf.length === 0) return reply.status(400).send({ error: 'Archivo vacío' });
+
+    const safeName = `up-${randomUUID()}${ext}`;
+    const path = `${MEDIA_DIR}/${safeName}`;
+    try {
+      await mkdir(MEDIA_DIR, { recursive: true });
+      await writeFile(path, buf);
+    } catch (err) {
+      return reply.status(500).send({ error: `No se pudo guardar: ${(err as Error).message}` });
+    }
+    return reply.send({ path, kind, name: parsed.data.name, url: `/media/${safeName}` });
+  });
+
+  // Transcribe una nota de voz de la web con Groq Whisper (mismo modelo que Telegram).
+  fastify.post('/transcribe', { bodyLimit: UPLOAD_BODY_LIMIT }, async (req, reply) => {
+    if (!opts.groqApiKey) {
+      return reply.status(503).send({ error: 'Transcripción no disponible: falta GROQ_API_KEY. Configúrela en Integraciones, señor.' });
+    }
+    const parsed = z
+      .object({
+        data: z.string().min(1), // base64 del audio
+        mime: z.string().default('audio/webm'),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
+
+    let audio: Buffer;
+    try {
+      audio = Buffer.from(parsed.data.data, 'base64');
+    } catch {
+      return reply.status(400).send({ error: 'base64 inválido' });
+    }
+
+    try {
+      const form = new FormData();
+      const filename = parsed.data.mime.includes('ogg') ? 'voz.ogg' : 'voz.webm';
+      form.append('file', new Blob([audio], { type: parsed.data.mime }), filename);
+      form.append('model', 'whisper-large-v3-turbo');
+      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${opts.groqApiKey}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        return reply.status(502).send({ error: `Whisper error ${res.status}: ${detail.slice(0, 200)}` });
+      }
+      const json = (await res.json()) as { text?: string };
+      return reply.send({ text: (json.text ?? '').trim() });
+    } catch (err) {
+      return reply.status(502).send({ error: (err as Error).message });
     }
   });
 

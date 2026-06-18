@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../hooks/useChat.js';
 import { ToolCallCard } from './ToolCallCard.js';
-import { MediaPreview, findMedia } from './MediaPreview.js';
+import { MediaPreview, findMedia, stripAttachmentMarkers } from './MediaPreview.js';
 import clsx from 'clsx';
 
 interface Props {
@@ -9,7 +9,10 @@ interface Props {
 
 export function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user';
-  const media = !isUser && message.content ? findMedia(message.content) : [];
+  // Medios tanto del asistente (genera en /tmp/emma) como del señor (adjuntos subidos).
+  const media = message.content ? findMedia(message.content) : [];
+  // En los mensajes del señor, ocultar el marcador técnico del adjunto (ya se previsualiza).
+  const text = isUser ? stripAttachmentMarkers(message.content) : message.content;
 
   return (
     <div className={clsx('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
@@ -21,7 +24,7 @@ export function MessageBubble({ message }: Props) {
             : 'bg-gray-800 text-gray-100 rounded-tl-sm',
         )}
       >
-        {message.content}
+        {text}
         {message.streaming && !message.content && (
           <span className="inline-block w-2 h-4 bg-gray-400 animate-pulse ml-1" />
         )}

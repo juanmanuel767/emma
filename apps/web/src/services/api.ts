@@ -284,6 +284,55 @@ export async function pullModel(
   }
 }
 
+// ── Adjuntos entrantes (imágenes / audio / archivos del señor) ───────────────
+
+export interface UploadResult {
+  path: string;            // ruta en /tmp/emma/... (marcador para el agente)
+  kind: 'image' | 'audio' | 'file';
+  name: string;            // nombre original
+  url: string;             // /media/<archivo> para previsualizar
+}
+
+function fileToBase64(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // data:<mime>;base64,XXXX → quedarnos solo con XXXX
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Sube un adjunto al gateway; devuelve su ruta en /tmp/emma para referenciarla en el mensaje. */
+export async function uploadFile(file: File): Promise<UploadResult> {
+  const data = await fileToBase64(file);
+  const res = await fetch(`${GATEWAY_URL}/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: file.name, data }),
+  });
+  const body = (await res.json()) as UploadResult & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? `Error ${res.status} al subir`);
+  return body;
+}
+
+/** Transcribe una nota de voz grabada en el navegador (Groq Whisper vía gateway). */
+export async function transcribeAudio(blob: Blob): Promise<string> {
+  const data = await fileToBase64(blob);
+  const res = await fetch(`${GATEWAY_URL}/transcribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data, mime: blob.type || 'audio/webm' }),
+  });
+  const body = (await res.json()) as { text?: string; error?: string };
+  if (!res.ok) throw new Error(body.error ?? `Error ${res.status} al transcribir`);
+  return body.text ?? '';
+}
+
 export async function* streamChat(
   message: string,
   sessionId: string,

@@ -16,6 +16,7 @@ export async function buildGateway(deps: {
   port: number;
   redisUrl: string;
   ollamaBaseUrl: string;
+  groqApiKey?: string;
 }) {
   const app = Fastify({ logger: false, trustProxy: true });
 
@@ -46,7 +47,7 @@ export async function buildGateway(deps: {
     }
   });
 
-  await app.register(chatRoutes, { agentClient: deps.agentClient });
+  await app.register(chatRoutes, { agentClient: deps.agentClient, groqApiKey: deps.groqApiKey });
   await app.register(settingsRoutes);
   await app.register(modelManagerRoutes, { ollamaBaseUrl: deps.ollamaBaseUrl });
 

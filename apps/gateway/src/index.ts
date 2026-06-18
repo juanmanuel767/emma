@@ -18,6 +18,9 @@ const envSchema = z.object({
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
   JWT_SECRET: z.string().min(32),
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
+  // Clave Groq SOLO para transcribir notas de voz de la web (Whisper), igual que Telegram.
+  // Opcional: sin ella el micrófono de la web avisa amablemente que falta configurarla.
+  GROQ_API_KEY: z.string().transform((v) => v || undefined).optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });
 
@@ -32,6 +35,7 @@ async function main() {
     port: env.GATEWAY_PORT,
     redisUrl: env.REDIS_URL,
     ollamaBaseUrl: env.OLLAMA_BASE_URL,
+    groqApiKey: env.GROQ_API_KEY,
   });
 
   const shutdown = async () => {

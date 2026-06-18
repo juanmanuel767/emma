@@ -14,6 +14,15 @@ export function findMedia(text: string): string[] {
   return Array.from(new Set(matches));
 }
 
+// Marcadores que la web inyecta al adjuntar ("[imagen adjunta guardada en: /tmp/emma/...]").
+// Se ocultan del texto visible: la previsualización ya muestra el archivo.
+const MARKER_RE = /\[(?:imagen adjunta|archivo adjunto)[^\]]*\/tmp\/emma\/[^\]]+\]/gi;
+
+/** Quita los marcadores de adjunto del texto visible (deja el resto intacto). */
+export function stripAttachmentMarkers(text: string): string {
+  return text.replace(MARKER_RE, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function MediaPreview({ paths }: { paths: string[] }) {
   if (paths.length === 0) return null;
   return (
